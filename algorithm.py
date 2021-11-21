@@ -5,20 +5,20 @@ def algorithm(prior_mean, prior_std, n_steps, sample_size, objective, std_decay=
     """
     Maximize objective by the bayesian algorithm with sampling.
 
-    :param prior_mean: (n,) tensor
+    :param prior_mean: (d,) tensor
     :param prior_std: scalar tensor
     :param n_steps: int
     :param sample_size: int
-    :param objective: function taking (m, n) tensor and returning (m,) tensor
+    :param objective: function taking (sample_size, d) tensor and returning (sample_size,) tensor
     :param std_decay: None or scalar tensor, in the latter case prior_std is multiplied by it at each step
     :param seed: int
-    :return: (n,) tensor
+    :return: (d,) tensor
     """
     trajectory = [prior_mean.clone()]
     for step in range(n_steps):
         if seed is not None:
             torch.manual_seed(seed + step)
-        sample = torch.normal(prior_mean.expand(sample_size, -1), prior_std)  # (sample_size, n)
+        sample = torch.normal(prior_mean.expand(sample_size, -1), prior_std)  # (sample_size, d)
 
         objective_values = objective(sample)  # (sample_size,)
         weights = torch.softmax(objective_values, dim=-1)  # (sample_size,)
