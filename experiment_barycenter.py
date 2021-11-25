@@ -4,6 +4,7 @@ import pickle
 import os.path
 
 from algorithm import algorithm
+from utils import safe_log, plot_trajectory
 
 
 def get_cost_matrix(im_sz, device):
@@ -68,15 +69,16 @@ def map_to_simplex(theta, n):
     Ys = theta[n:].reshape(-1, n**2)
     r = torch.softmax(z, dim=-1)
     Xs = torch.softmax(Ys, dim=-1)
-    return r, Xs  # fixme reshape Xs from (m, n^2) to (m, n, n)
-
-def print_cost_mat(device):
-    for im_sz in [2, 3]:
-        C = get_cost_matrix(im_sz, device)
-        print(C)
+    return r, Xs.reshape(-1, n, n)
 
 
 def get_data_and_solution(device):
+    """
+    Get two simple 3x3 images and their barycenter.
+
+    :param device: 'cuda' or 'cpu'
+    :return: list of (2, 9) tensor (data points) and (9,) tensor (barycenter)
+    """
     ones = torch.ones((3, 1), device=device) / 3
     c1 = ones * torch.tensor([1., 0, 0], device=device)
     c2 = ones * torch.tensor([0., 0, 1], device=device)
@@ -85,55 +87,49 @@ def get_data_and_solution(device):
     return cs, barycenter.flatten()
 
 
-def get_optimal_plans(device):
+def main(kappa, std_decay, sample_size, n_steps, prior_std, noise_level):
+    device = 'cuda'
     im_sz = 3
-    X1 = torch.zeros(im_sz**2, im_sz**2, device=device)
-    X2 = torch.zeros_like(X1)
-    for i, idx_in_r in enumerate([1, 4, 7]):
-        X1[idx_in_r, i*3] = 1. / 3.
-        X2[idx_in_r, i*3 + 2] = 1. / 3.
-    return torch.stack([X1, X2])
-
-
-def print_data_and_solution(device):
-    cs, r = get_data_and_solution(device)
-    c1, c2 = cs[0], cs[1]
-    for img in [c1, c2, r]:
-        print(img.reshape(3, 3))
-
-
-def check_plans(device, Xs):
-    cs, r = get_data_and_solution(device)
-    residue_r, residue_c = marginals_residuals(r, Xs, cs)
-    print('Marginals residuals:', residue_r.item(), residue_c.item())
-
-
-def compare_objective(device):
-    cs, r = get_data_and_solution(device)
-    Xs = get_optimal_plans(device)
-    check_plans(device, Xs)
-
-    X1_unoptimal = r.unsqueeze(1) @ cs[0].unsqueeze(0)
-    X2_unoptimal = r.unsqueeze(1) @ cs[1].unsqueeze(0)
-    Xs_unoptimal = torch.stack([X1_unoptimal, X2_unoptimal])
-    check_plans(device, Xs_unoptimal)
-
-    im_sz = 3
+    n = im_sz**2
     cost_mat = get_cost_matrix(im_sz, device)
-    kappas = [torch.tensor(1.), torch.tensor(1.)]
-    value_optimal = barycenter_objective(r, Xs, cost_mat, kappas, cs)
-    value_unoptimal = barycenter_objective(r, Xs_unoptimal, cost_mat, kappas, cs)
-    print(f"Optimal value: {value_optimal}, unoptimal value: {value_unoptimal}")
+    cs, r_opt = get_data_and_solution(device)
+    kappas = [kappa, kappa]
 
+    def objective(sample):
+        sample_size = sample.shape[0]
+        values = torch.empty(sample_size, device=device)
+        for i in range(sample_size):
+            r, Xs = map_to_simplex(sample[i], n)
+            values[i] = barycenter_objective(r, Xs, cost_mat, kappas, cs)
+        return values
 
-def main():
-    pass
+    noise = torch.normal(torch.zeros_like(r_opt), noise_level)
+    r_prior = r_opt + torch.where(noise > 0., noise, torch.tensor(0., device=device))
+    r_prior /= r_prior.sum()
+
+    X1 = r_prior.unsqueeze(1) @ cs[0].unsqueeze(0)
+    X2 = r_prior.unsqueeze(1) @ cs[1].unsqueeze(0)
+    Xs = torch.stack([X1, X2])
+
+    z_prior = safe_log(r_prior, device)
+    Ys = safe_log(Xs, device)
+    prior_mean = torch.cat((z_prior, Ys.flatten()))
+
+    def get_info(theta):  # store only barycenters in trajectory
+        return theta[:n].clone()
+
+    trajectory = algorithm(prior_mean, prior_std, n_steps, sample_size, objective,
+                           std_decay=std_decay, seed=0, get_info=get_info, track_time=True)
+    n_cols = 6
+    img_name = f"kappa_{kappa}_sample_size_{sample_size}_prior_std_{prior_std}"
+    plot_trajectory(trajectory, n_cols, im_sz, img_name)
 
 
 if __name__ == "__main__":
-    device = 'cuda'
-    # print_cost_mat(device)
-    # print_data_and_solution(device)
-    # Xs = get_optimal_plans(device)
-    # check_plans(device, Xs)
-    compare_objective(device)
+    std_decay = 0.99
+    noise_level = 0.05
+    n_steps = 20
+    sample_size = 1000
+    kappa = 2.
+    prior_std = 10.
+    main(kappa, std_decay, sample_size, n_steps, prior_std, noise_level)
