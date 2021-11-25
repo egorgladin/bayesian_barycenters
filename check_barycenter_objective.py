@@ -4,23 +4,13 @@ from utils import safe_log
 
 
 from experiment_barycenter import get_cost_matrix, marginals_residuals,\
-    barycenter_objective, get_data_and_solution, map_to_simplex
+    barycenter_objective, get_data_and_solution, map_to_simplex, get_optimal_plans
 
 
 def print_cost_mat(device):
     for im_sz in [2, 3]:
         C = get_cost_matrix(im_sz, device)
         print(C)
-
-
-def get_optimal_plans(device):
-    im_sz = 3
-    X1 = torch.zeros(im_sz**2, im_sz**2, device=device)
-    X2 = torch.zeros_like(X1)
-    for i, idx_in_r in enumerate([1, 4, 7]):
-        X1[idx_in_r, i*3] = 1. / 3.
-        X2[idx_in_r, i*3 + 2] = 1. / 3.
-    return torch.stack([X1, X2])
 
 
 def print_data_and_solution(device):

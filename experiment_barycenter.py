@@ -4,7 +4,7 @@ import pickle
 import os.path
 
 from algorithm import algorithm
-from utils import safe_log, plot_trajectory
+from utils import safe_log, plot_trajectory, norm_sq
 
 
 def get_cost_matrix(im_sz, device):
@@ -37,7 +37,7 @@ def marginals_residuals(r, Xs, cs):
     """
     margin_r = Xs.sum(dim=-1) - r  # (m, n) tensor
     margin_c = Xs.sum(dim=1) - cs  # (m, n) tensor
-    return (margin_r ** 2).sum(), (margin_c ** 2).sum()
+    return norm_sq(margin_r), norm_sq(margin_c)
 
 
 def barycenter_objective(r, Xs, cost_mat, kappas, cs):
@@ -87,12 +87,29 @@ def get_data_and_solution(device):
     return cs, barycenter.flatten()
 
 
+def get_optimal_plans(device):
+    """
+    Get optimal plans for simple 3x3 images.
+
+    :param device: 'cuda' or 'cpu'
+    :return: (2, 9, 9) tensor
+    """
+    im_sz = 3
+    X1 = torch.zeros(im_sz**2, im_sz**2, device=device)
+    X2 = torch.zeros_like(X1)
+    for i, idx_in_r in enumerate([1, 4, 7]):
+        X1[idx_in_r, i*3] = 1. / 3.
+        X2[idx_in_r, i*3 + 2] = 1. / 3.
+    return torch.stack([X1, X2])
+
+
 def main(kappa, std_decay, sample_size, n_steps, prior_std, noise_level):
     device = 'cuda'
     im_sz = 3
     n = im_sz**2
     cost_mat = get_cost_matrix(im_sz, device)
     cs, r_opt = get_data_and_solution(device)
+    Xs_opt = get_optimal_plans(device)
     kappas = [kappa, kappa]
 
     def objective(sample):
@@ -116,7 +133,12 @@ def main(kappa, std_decay, sample_size, n_steps, prior_std, noise_level):
     prior_mean = torch.cat((z_prior, Ys.flatten()))
 
     def get_info(theta):  # store only barycenters in trajectory
-        return theta[:n].clone()
+        r, Xs = map_to_simplex(theta, n)
+        residue_r, residue_c = marginals_residuals(r, Xs, cs)
+        acc_X1 = norm_sq(Xs[0] - Xs_opt[0])
+        acc_X2 = norm_sq(Xs[1] - Xs_opt[1])
+        acc_r = norm_sq(r - r_opt)
+        return r, residue_r, residue_c, acc_X1, acc_X2, acc_r  # theta[:n].clone()
 
     trajectory = algorithm(prior_mean, prior_std, n_steps, sample_size, objective,
                            std_decay=std_decay, seed=0, get_info=get_info, track_time=True)
@@ -128,7 +150,7 @@ def main(kappa, std_decay, sample_size, n_steps, prior_std, noise_level):
 if __name__ == "__main__":
     std_decay = 0.99
     noise_level = 0.05
-    n_steps = 20
+    n_steps = 13
     sample_size = 1000
     kappa = 2.
     prior_std = 10.
