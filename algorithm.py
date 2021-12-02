@@ -1,3 +1,6 @@
+"""
+Algorithm: maximize objective by the bayesian algorithm with sampling.
+"""
 import torch
 import time
 

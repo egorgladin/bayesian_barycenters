@@ -1,3 +1,6 @@
+"""
+Experiment: find maximizer of a concave quadratic function.
+"""
 import torch
 import math
 from utils import safe_log
@@ -48,11 +51,11 @@ def check_inverse(device):
     cs, r = get_data_and_solution(device)
     c1, c2 = cs[0], cs[1]
     Xs = get_optimal_plans(device)
-    Ys = safe_log(Xs, device)
+    Ys = safe_log(Xs)
     n = 9
 
     for distr in [c1, c2, r]:
-        z = safe_log(distr, device, minus_inf=-100.)
+        z = safe_log(distr, minus_inf=-100.)
         sample = torch.cat((z, Ys.flatten()))
         r_, Xs_ = map_to_simplex(sample, n)
         isclose = torch.allclose(r_, distr, rtol=0., atol=math.exp(-100.), equal_nan=False)
