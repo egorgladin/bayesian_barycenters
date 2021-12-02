@@ -1,7 +1,4 @@
 import torch
-import matplotlib.pyplot as plt
-import pickle
-import os.path
 
 from algorithm import algorithm
 from utils import safe_log, plot_trajectory, norm_sq
@@ -105,12 +102,12 @@ def get_optimal_plans(device):
 
 def main(kappa, std_decay, sample_size, n_steps, prior_std, noise_level):
     device = 'cuda'
-    im_sz = 3
-    n = im_sz**2
+    im_sz = 3  # image size is 3x3
+    n = im_sz**2  # barycenter dimensionality
     cost_mat = get_cost_matrix(im_sz, device)
     cs, r_opt = get_data_and_solution(device)
     Xs_opt = get_optimal_plans(device)
-    kappas = [kappa, kappa]
+    kappas = [kappa, kappa]  # equal coefficients for penalizing both marginals
 
     def objective(sample):
         sample_size = sample.shape[0]
@@ -118,27 +115,40 @@ def main(kappa, std_decay, sample_size, n_steps, prior_std, noise_level):
         for i in range(sample_size):
             r, Xs = map_to_simplex(sample[i], n)
             values[i] = barycenter_objective(r, Xs, cost_mat, kappas, cs)
-        return values
+        return -values  # minus because the algorithm maximizes the objective
 
+    # initial point is defined as the true barycenter + noise
     noise = torch.normal(torch.zeros_like(r_opt), noise_level)
     r_prior = r_opt + torch.where(noise > 0., noise, torch.tensor(0., device=device))
     r_prior /= r_prior.sum()
 
+    # define initial transport plans that give correct marginals
     X1 = r_prior.unsqueeze(1) @ cs[0].unsqueeze(0)
     X2 = r_prior.unsqueeze(1) @ cs[1].unsqueeze(0)
     Xs = torch.stack([X1, X2])
 
+    # map to the whole Euclidean space
     z_prior = safe_log(r_prior, device)
     Ys = safe_log(Xs, device)
-    prior_mean = torch.cat((z_prior, Ys.flatten()))
+    prior_mean = torch.cat((z_prior, Ys.flatten()))  # concatenate variables in one tensor
 
-    def get_info(theta):  # store only barycenters in trajectory
+    # the following function is needed to store info about convergence of the algorithm
+    def get_info(theta):
+        """
+        Get information about how far the current point from optimum.
+
+        :param theta: vector of variables at the current step
+        :return: list containing current approximation of barycenter and
+            information about how far the current point from optimum
+        """
         r, Xs = map_to_simplex(theta, n)
         residue_r, residue_c = marginals_residuals(r, Xs, cs)
-        acc_X1 = norm_sq(Xs[0] - Xs_opt[0])
+        acc_X1 = norm_sq(Xs[0] - Xs_opt[0])  # distance between current and optimal plans
         acc_X2 = norm_sq(Xs[1] - Xs_opt[1])
-        acc_r = norm_sq(r - r_opt)
-        return r, residue_r, residue_c, acc_X1, acc_X2, acc_r  # theta[:n].clone()
+        acc_r = norm_sq(r - r_opt)  # distance between current approximation and true barycenter
+        objective_val = -objective(theta.unsqueeze(0)).item()
+        transport_cost = torch.tensordot(Xs, cost_mat.unsqueeze(0), dims=3).item()
+        return r, residue_r, residue_c, objective_val, transport_cost, acc_X1, acc_X2, acc_r
 
     trajectory = algorithm(prior_mean, prior_std, n_steps, sample_size, objective,
                            std_decay=std_decay, seed=0, get_info=get_info, track_time=True)
@@ -148,10 +158,10 @@ def main(kappa, std_decay, sample_size, n_steps, prior_std, noise_level):
 
 
 if __name__ == "__main__":
-    std_decay = 0.99
-    noise_level = 0.05
-    n_steps = 13
-    sample_size = 1000
-    kappa = 2.
-    prior_std = 10.
-    main(kappa, std_decay, sample_size, n_steps, prior_std, noise_level)
+    std_decay = 0.98  # decay rate of standard deviation for sampling
+    noise_level = 0.05  # initial point is defined as the true barycenter + noise
+    n_steps = 200  # number of iterations
+    sample_size = 100000
+    for prior_std in [8., 15.]:  # standard deviation for sampling
+        for kappa in [1., 3.]:  # coefficient for penalizing marginal distributions
+            main(kappa, std_decay, sample_size, n_steps, prior_std, noise_level)

@@ -1,12 +1,15 @@
 import torch
 import matplotlib.pyplot as plt
+import pickle
 
 
 def safe_log(arr, device, minus_inf=-100.):
+    """Elementwise logarithm with log(0) defined by minus_inf."""
     return torch.where(arr > 0, torch.log(arr), torch.tensor(minus_inf, device=device))
 
 
 def norm_sq(tensor):
+    """Squared Euclidean norm."""
     return (tensor ** 2).sum().item()
 
 
@@ -21,16 +24,13 @@ def show_barycenters(barycenters, img_sz, img_name):
 
 
 def plot_convergence(trajectory, img_name):
-    fig, axs = plt.subplots(3, 1, figsize=(7, 15))
-    all_names = [{'residue_r': 1, 'residue_c': 2}, {'acc_X1': 3, 'acc_X2': 4}, 'acc_r']
-    for ax, names in zip(axs, all_names):
-        if isinstance(names, dict):
-            for name, idx in names.items():
-                pts_to_plot = [el[idx] for el in trajectory[1:]] if idx in [1, 2]\
-                    else [el[idx] for el in trajectory[1:]]
-                ax.plot(pts_to_plot, label=name)
-        else:
-            ax.plot([el[5] for el in trajectory], label=names)
+    all_names = [{'residue_r': 1, 'residue_c': 2, 'objective': 3, 'transport_cost': 4}, {'acc_X1': 5, 'acc_X2': 6},
+                 {'acc_r': 7}]
+    fig, axs = plt.subplots(len(all_names), 1, figsize=(7, 15))
+    for i, names in enumerate(all_names):
+        ax = axs[i]
+        for name, idx in names.items():
+            ax.plot([el[idx] for el in trajectory[1:]], label=name)
 
         ax.legend()
         ax.set_yscale('log')
@@ -39,7 +39,10 @@ def plot_convergence(trajectory, img_name):
     plt.savefig(f"plots/convergence_{img_name}.png", bbox_inches='tight')
 
 
-def plot_trajectory(trajectory, n_cols, img_sz, img_name):  # r, residue_r, residue_c, acc_X1, acc_X2, acc_r
+def plot_trajectory(trajectory, n_cols, img_sz, img_name):
+    with open(f'trajectory_{img_name}.pickle', 'wb') as handle:
+        pickle.dump(trajectory, handle)
+
     n_steps = len(trajectory)
     plot_every = int(n_steps / n_cols) + 1 if n_steps % n_cols else int(n_steps / n_cols)
     barycenters = [el[0] for el in trajectory[::plot_every]]
