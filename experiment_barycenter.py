@@ -4,6 +4,7 @@ Experiment: find barycenter for a simple 3x3 setup.
 import numpy as np
 import torch
 import ot
+import scipy.stats
 
 from algorithm import algorithm
 from utils import safe_log, plot_trajectory, norm_sq
@@ -188,14 +189,26 @@ def alg_full_sampling(kappa, std_decay, sample_size, n_steps, prior_std, noise_l
     plot_trajectory(trajectory, n_cols, IMG_SIZE, img_name, info_names)
 
 
-def alg_ot_lib(std_decay, sample_size, n_steps, prior_std, noise_level, device):
+def alg_ot_lib(std_decay, sample_size, n_steps, prior_std, noise_level, device, add_entropy=False, start_coef=20., decrease=0.25):
     cost_mat = get_cost_matrix(IMG_SIZE, device, dtype=FLOAT64).numpy()
     cs, r_opt = get_data_and_solution(device, dtype=FLOAT64)
     cs = cs.numpy()
 
-    def objective(sample):
+    if add_entropy:
+        def get_reg_coeff():
+            current = start_coef
+            while True:
+                yield current
+                if current > 0:
+                    current -= decrease
+        reg_coefs = get_reg_coeff()
+    else:
+        reg_coefs = None
+
+    def objective(sample, reg_coef=None):
+        # sample has shape (sample_size, n)
         barycenters = torch.softmax(sample, dim=-1).numpy()
-        barycenters = np.ascontiguousarray(barycenters.T)
+        barycenters = np.ascontiguousarray(barycenters.T)  # shape (n, sample_size)
         if barycenters.shape[-1] == 1:  # evaluate objective for single point
             barycenters = barycenters.flatten()
             single_sample = True
@@ -203,12 +216,13 @@ def alg_ot_lib(std_decay, sample_size, n_steps, prior_std, noise_level, device):
             single_sample = False
 
         wasser_dist = [ot.emd2(c, barycenters, cost_mat) for c in cs]
+        entropy = reg_coef * scipy.stats.entropy(barycenters) if add_entropy and reg_coef else 0.  # shape (sample_size,)
 
         if single_sample:
-            objective_val = -sum(wasser_dist)
-        else:
-            objective_val = -torch.tensor(wasser_dist, device=device, dtype=FLOAT64).sum(dim=0)
-        return objective_val  # minus because the algorithm maximizes the objective
+            objective_val = sum(wasser_dist)
+        else:  # wasser_dist is list of (sample_size,) tensors
+            objective_val = torch.tensor(wasser_dist, device=device, dtype=FLOAT64).sum(dim=0)
+        return -objective_val + entropy  # minus because algorithm maximizes objective
 
     r_prior, z_prior = get_init_barycenter(r_opt, noise_level, seed=0)  # initial approx. barycenter
 
@@ -230,9 +244,9 @@ def alg_ot_lib(std_decay, sample_size, n_steps, prior_std, noise_level, device):
     info_names = [{'Objective': 1}, {'Accuracy of r': 2}]
 
     trajectory = algorithm(z_prior, prior_std, n_steps, sample_size, objective,
-                           std_decay=std_decay, seed=0, get_info=get_info, track_time=True)
+                           std_decay=std_decay, seed=0, get_info=get_info, track_time=True, hyperparam=reg_coefs)
     n_cols = 6
-    img_name = f"OT_sample_size_{sample_size}_prior_std_{prior_std}"
+    img_name = f"OT_samples_{sample_size}_std_{prior_std}_decay_{std_decay}"
     opt_val = get_optimal_value(device, cost_mat, cs, r_opt.numpy())  # needed for displaying optimal value on plot
     plot_trajectory(trajectory, n_cols, IMG_SIZE, img_name, info_names, opt_val=opt_val)
 
@@ -241,13 +255,15 @@ if __name__ == "__main__":
     USE_OT_LIBRARY = True
 
     device = 'cpu'
-    std_decay = 0.98  # decay rate of standard deviation for sampling
-    noise_level = 2.  # initial point is defined as the true barycenter + noise
-    n_steps = 200  # number of iterations
+    noise_level = 0.4  # initial point is defined as the true barycenter + noise
+    prior_stds = [2.5]  # test various standard deviations for sampling
+    std_decays = [0.85]  # test various decay rates of standard deviation for sampling
+    n_steps = 20  # number of iterations
     sample_size = 10000
-    for prior_std in [2.5, 3., 4.]:  # test various standard deviations for sampling
-        if USE_OT_LIBRARY:
-            alg_ot_lib(std_decay, sample_size, n_steps, prior_std, noise_level, device)
-        else:
-            for kappa in [1., 3.]:  # test various coefficients for penalizing marginal distributions
-                alg_full_sampling(kappa, std_decay, sample_size, n_steps, prior_std, noise_level, device)
+    for std_decay in std_decays:
+        for prior_std in prior_stds:
+            if USE_OT_LIBRARY:
+                alg_ot_lib(std_decay, sample_size, n_steps, float(prior_std), noise_level, device, add_entropy=False)
+            else:
+                for kappa in [1., 3.]:  # test various coefficients for penalizing marginal distributions
+                    alg_full_sampling(kappa, std_decay, sample_size, n_steps, prior_std, noise_level, device)

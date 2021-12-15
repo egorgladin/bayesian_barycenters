@@ -6,7 +6,7 @@ import time
 
 
 def algorithm(prior_mean, prior_std, n_steps, sample_size, objective,
-              std_decay=None, seed=None, get_info=None, track_time=False):
+              std_decay=None, seed=None, get_info=None, track_time=False, hyperparam=None):
     """
     Maximize objective by the bayesian algorithm with sampling.
 
@@ -20,6 +20,7 @@ def algorithm(prior_mean, prior_std, n_steps, sample_size, objective,
     :param get_info: if None, parameters on each step are stored in trajectory, otherwise it's a function
         output of which is stored in trajectory
     :param track_time: if True, print out duration of each iteration
+    :param hyperparam: generator passed to objective
     :return: (d,) tensor
     """
     trajectory = [prior_mean.clone() if get_info is None
@@ -31,7 +32,7 @@ def algorithm(prior_mean, prior_std, n_steps, sample_size, objective,
             torch.manual_seed(seed + step)
         sample = torch.normal(prior_mean.expand(sample_size, -1), prior_std)  # (sample_size, d)
 
-        objective_values = objective(sample)  # (sample_size,)
+        objective_values = objective(sample, next(hyperparam)) if hyperparam else objective(sample)  # (sample_size,)
         weights = torch.softmax(objective_values, dim=-1)  # (sample_size,)
         prior_mean = weights @ sample
         trajectory.append(prior_mean.clone() if get_info is None else get_info(prior_mean))
