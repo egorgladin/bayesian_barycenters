@@ -3,6 +3,7 @@ Experiment: find barycenter for a simple 3x3 setup.
 """
 import numpy as np
 import torch
+from torch.distributions.multivariate_normal import MultivariateNormal
 import ot
 import scipy.stats
 
@@ -80,19 +81,25 @@ def map_to_simplex(theta, n_):
     return r, Xs.reshape(-1, n_, n_)
 
 
-def get_data_and_solution(device, dtype=torch.float32):
+def get_data_and_solution(device, dtype=torch.float32, size=3):
     """
     Get two simple 3x3 images and their barycenter.
 
     :param device: 'cuda' or 'cpu'
     :return: list of (2, 9) tensor (data points) and (9,) tensor (barycenter)
     """
-    ones = torch.ones((3, 1), device=device, dtype=dtype) / 3
-    c1 = ones * torch.tensor([1., 0, 0], device=device, dtype=dtype)
-    c2 = ones * torch.tensor([0., 0, 1], device=device, dtype=dtype)
-    barycenter = ones * torch.tensor([0., 1, 0], device=device, dtype=dtype)
-    cs = torch.stack([c1.flatten(), c2.flatten()])
-    return cs, barycenter.flatten()
+    cs = []
+    for i in range(size):
+        c = torch.zeros((size, size), device=device, dtype=dtype)
+        c[:, i] = 1. / size
+        c = c.flatten()
+        if i == size // 2:
+            barycenter = c
+        else:
+            cs.append(c)
+
+    cs = torch.stack(cs)
+    return cs, barycenter
 
 
 def get_optimal_plans(device):
@@ -243,17 +250,25 @@ def alg_ot_lib(std_decay, sample_size, n_steps, prior_std, noise_level, device, 
     # Names and indices of elements of the list returned by 'get_info'
     info_names = [{'Objective': 1}, {'Accuracy of r': 2}]
 
-    trajectory = algorithm(z_prior, prior_std, n_steps, sample_size, objective,
-                           std_decay=std_decay, seed=0, get_info=get_info, track_time=True, hyperparam=reg_coefs)
+    prior_cov = prior_std**2 * torch.eye(n, dtype=FLOAT64)
+    def get_sample(mean, cov, seed):
+        if seed is not None:
+            torch.manual_seed(seed)
+        distr = MultivariateNormal(loc=mean, covariance_matrix=cov)
+        return distr.sample((sample_size,))
+
+    def recalculate_cov(old_cov, sample, step, weights):
+        return std_decay * torch.cov(sample.T, aweights=weights)
+
+    trajectory = algorithm(z_prior, prior_cov, get_sample, n_steps, objective,
+                           recalculate_cov, seed=0, get_info=get_info, track_time=True, hyperparam=reg_coefs)
     n_cols = 6
-    img_name = f"OT_samples_{sample_size}_std_{prior_std}_decay_{std_decay}"
+    img_name = f"COV_samples_{sample_size}_std_{prior_std}_decay_{std_decay}"
     opt_val = get_optimal_value(device, cost_mat, cs, r_opt.numpy())  # needed for displaying optimal value on plot
     plot_trajectory(trajectory, n_cols, IMG_SIZE, img_name, info_names, opt_val=opt_val)
 
 
 if __name__ == "__main__":
-    USE_OT_LIBRARY = True
-
     device = 'cpu'
     noise_level = 0.4  # initial point is defined as the true barycenter + noise
     prior_stds = [2.5]  # test various standard deviations for sampling
@@ -262,8 +277,4 @@ if __name__ == "__main__":
     sample_size = 10000
     for std_decay in std_decays:
         for prior_std in prior_stds:
-            if USE_OT_LIBRARY:
-                alg_ot_lib(std_decay, sample_size, n_steps, float(prior_std), noise_level, device, add_entropy=False)
-            else:
-                for kappa in [1., 3.]:  # test various coefficients for penalizing marginal distributions
-                    alg_full_sampling(kappa, std_decay, sample_size, n_steps, prior_std, noise_level, device)
+            alg_ot_lib(std_decay, sample_size, n_steps, float(prior_std), noise_level, device, add_entropy=False)
