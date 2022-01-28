@@ -14,7 +14,7 @@ def safe_log(arr, minus_inf=-100.):
 
 def norm_sq(tensor):
     """Squared Euclidean norm."""
-    return (tensor ** 2).sum().item()
+    return torch.square(tensor).sum().item()
 
 
 def show_barycenters(barycenters, img_sz, img_name, iterations=None):
@@ -42,7 +42,7 @@ def plot_convergence(trajectory, img_name, info_names, log_scale=False, opt_val=
         for name, idx in names.items():
             ax.plot([el[idx] for el in trajectory[1:]], label=name)
             if name == 'Objective' and opt_val is not None:
-                ax.hlines(y=opt_val, xmin=0, xmax=len(trajectory)-2, color='green', label='Optimal value')
+                ax.hlines(y=opt_val, xmin=0, xmax=len(trajectory)-2, label='Optimal value')
         ax.yaxis.grid()
 
         ax.legend()
@@ -55,7 +55,7 @@ def plot_convergence(trajectory, img_name, info_names, log_scale=False, opt_val=
 
 def plot_trajectory(trajectory, n_cols, img_sz, img_name, info_names, log_scale=False, opt_val=None):
     """Display several barycenters and plot other info stored in trajectory."""
-    with open(f'trajectory_{img_name}.pickle', 'wb') as handle:
+    with open(f'pickled/trajectory_{img_name}.pickle', 'wb') as handle:
         pickle.dump(trajectory, handle)
 
     n_steps = len(trajectory) - 1

@@ -4,7 +4,6 @@ Experiment: find barycenter for a simple 3x3 setup.
 import numpy as np
 import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
-from torch.distributions import constraints
 import ot
 import scipy.stats
 import time
@@ -74,7 +73,7 @@ def get_optimal_value(device, cost_mat, cs, r_opt):
     return sum(wasser_dist)
 
 
-def experiment_pot(dtype, img_size, column_interval, n_steps, device, sample_size, prior_var, var_decay, noise_level, add_entropy=False,
+def experiment_pot(dtype, img_size, column_interval, n_steps, device, sample_size, prior_var, var_decay, noise_level=None, add_entropy=False,
                    start_coef=20., decrease=0.25):
     cost_mat = get_cost_matrix(img_size, device, dtype=dtype).numpy()
     cs, r_opt = get_data_and_solution(device, dtype=dtype, size=img_size, column_interval=column_interval)
@@ -110,10 +109,12 @@ def experiment_pot(dtype, img_size, column_interval, n_steps, device, sample_siz
             objective_val = torch.tensor(wasser_dist, device=device, dtype=dtype).sum(dim=0)
         return -objective_val + entropy  # minus because algorithm maximizes objective
 
-    r_prior = torch.ones_like(r_opt)
-    r_prior /= r_prior.sum()
-    z_prior = safe_log(r_prior)
-    # r_prior, z_prior = get_init_barycenter(r_opt, noise_level, seed=0)  # initial approx. barycenter
+    if noise_level is not None:
+        r_prior, z_prior = get_init_barycenter(r_opt, noise_level, seed=0)  # initial approx. barycenter
+    else:
+        r_prior = torch.ones_like(r_opt)
+        r_prior /= r_prior.sum()
+        z_prior = safe_log(r_prior)
 
     # the following function is needed to store info about convergence of the algorithm
     def get_info(z):
@@ -169,7 +170,6 @@ def main():
     # prior_var = 7.  # initial variance of prior
     var_decays = [0.65, 0.8, 0.95]
     # var_decay = 0.85  # decay rate for variance
-    noise_level = 0.4  # initial mean of prior is defined as log(true barycenter + noise)
 
     for sample_size in sample_sizes:
         print("SAMPLE SIZE:", sample_size)
@@ -179,7 +179,7 @@ def main():
         for prior_var in prior_vars:
             for var_decay in var_decays:
                 start = time.time()
-                acc_r, traj = experiment_pot(dtype, img_size, column_interval, n_steps, device, sample_size, prior_var, var_decay, noise_level)
+                acc_r, traj = experiment_pot(dtype, img_size, column_interval, n_steps, device, sample_size, prior_var, var_decay)
                 print(f"Experiment took {time.time() - start:.2f} s")
                 if acc_r < best_acc:
                     best_acc = acc_r

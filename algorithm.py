@@ -3,6 +3,7 @@ Algorithm: maximize objective by the bayesian algorithm with sampling.
 """
 import torch
 import time
+import gc
 
 
 def algorithm(prior_mean, prior_cov, get_sample, n_steps, objective,
@@ -34,6 +35,8 @@ def algorithm(prior_mean, prior_cov, get_sample, n_steps, objective,
 
         prior_mean = weights @ sample
         prior_cov = recalculate_cov(prior_cov, sample, step, weights)
+        del sample
+        gc.collect()
         trajectory.append(prior_mean.clone() if get_info is None else get_info(prior_mean))
 
         if track_time:

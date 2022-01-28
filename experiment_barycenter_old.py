@@ -4,7 +4,6 @@ Experiment: find barycenter for a simple 3x3 setup.
 import numpy as np
 import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
-import ot
 import scipy.stats
 
 from algorithm import algorithm
@@ -47,9 +46,9 @@ def map_to_simplex(theta, n_):
     """
     Map a vector of parameters from R^d to points on unit simplexes.
 
-    :param theta: (d,) tensor with d = n + m*n^2
+    :param theta: (d,) tensor with d = n_ + m*n^2
     :param n_: dimension of barycenter
-    :return: list of (n,) tensor (barycenter) and (m, n, n) tensor (plans)
+    :return: list of (n_,) tensor (barycenter) and (m, n_, n_) tensor (plans)
     """
     z = theta[:n_]
     Ys = theta[n_:].reshape(-1, n_ ** 2)
@@ -85,12 +84,13 @@ def get_init_plans(r_prior, cs):
     return Xs, Ys
 
 
-def alg_full_sampling(img_size, kappa, std_decay, sample_size, n_steps, prior_std, noise_level, device):
+def alg_full_sampling(img_size, kappa, var_decay, sample_size, n_steps, prior_std, device, noise_level=None):
     n = img_size ** 2  # barycenter dimensionality
     cost_mat = get_cost_matrix(img_size, device)
     cs, r_opt = get_data_and_solution(device)
     Xs_opt = get_optimal_plans(device)
-    kappas = [kappa, kappa]  # equal coefficients for penalizing both marginals
+    # kappas = [kappa, kappa]  # equal coefficients for penalizing both marginals
+    kappas = [torch.tensor(kappa, device=device)] * 2
 
     def objective(sample):
         sample_size = sample.shape[0]
@@ -101,7 +101,12 @@ def alg_full_sampling(img_size, kappa, std_decay, sample_size, n_steps, prior_st
         return -values  # minus because the algorithm maximizes the objective
 
     # Define initial approx. barycenter and transport plans as well as their counterparts in R^n
-    r_prior, z_prior = get_init_barycenter(r_opt, noise_level, seed=0)
+    if noise_level is not None:
+        r_prior, z_prior = get_init_barycenter(r_opt, noise_level, seed=0)  # initial approx. barycenter
+    else:
+        r_prior = torch.ones_like(r_opt)
+        r_prior /= r_prior.sum()
+        z_prior = safe_log(r_prior)
     Xs, Ys = get_init_plans(r_prior, cs)
     prior_mean = torch.cat((z_prior, Ys.flatten()))  # concatenate variables in one tensor
 
@@ -119,35 +124,44 @@ def alg_full_sampling(img_size, kappa, std_decay, sample_size, n_steps, prior_st
         acc_X1 = norm_sq(Xs[0] - Xs_opt[0])  # distance between current and optimal plans
         acc_X2 = norm_sq(Xs[1] - Xs_opt[1])
         acc_r = norm_sq(r - r_opt)  # distance between current approximation and true barycenter
+        print(f"Error of r: {acc_r:.3f}")
         objective_val = -objective(theta.unsqueeze(0)).item()
         transport_cost = torch.tensordot(Xs, cost_mat.unsqueeze(0), dims=3).item()
         return r, residue_r, residue_c, objective_val, transport_cost, acc_X1, acc_X2, acc_r
 
     # Names and indices of elements of the list returned by 'get_info'
     info_names = [{'Marginal error for r': 1, 'Marginal error for c': 2, 'Objective': 3, 'Transport cost': 4},
-                  {'Accuracy of X1': 5, 'Accuracy of X2': 6}, {'Accuracy of r': 7}]
+                  {'Error of X1': 5, 'Error of X2': 6}, {'Error of r': 7}]
 
-    trajectory = algorithm(prior_mean, prior_std, n_steps, sample_size, objective,
-                           std_decay=std_decay, seed=0, get_info=get_info, track_time=True)  # fixme
+    def get_sample(mean, prior_std, seed):
+        if seed is not None:
+            torch.manual_seed(seed)
+        sample = torch.normal(mean.expand(sample_size, -1), prior_std)  # (sample_size, d)
+        return sample
+
+    def recalculate_cov(old_std, sample, step, weights):
+        return var_decay * old_std
+
+    trajectory = algorithm(prior_mean, prior_std, get_sample, n_steps, objective,
+                           recalculate_cov, seed=0, get_info=get_info, track_time=True)
     n_cols = 6
     img_name = f"kappa_{kappa}_sample_size_{sample_size}_prior_std_{prior_std}"
-    plot_trajectory(trajectory, n_cols, img_size, img_name, info_names)
+    opt_val = barycenter_objective(r_opt, Xs_opt, cost_mat, kappas, cs)
+    plot_trajectory(trajectory, n_cols, img_size, img_name, info_names, opt_val=opt_val)
 
 
 def main():
-    dtype = torch.float64  # avoid errors when converting from torch to numpy
     img_size = 3  # image size is DxD
-    n_steps = 30  # number of iterations
+    n_steps = 200  # number of iterations
 
     # Hyperparameters
     device = 'cpu'
     sample_size = 100000
-    prior_std = 2.5  # initial variance of prior
-    std_decay = 0.9  # decay rate for variance
-    noise_level = 0.1  # initial mean of prior is defined as log(true barycenter + noise)
+    prior_std = 3.  # initial variance of prior
+    std_decay = 0.98  # decay rate for variance
     kappa = 1.
 
-    alg_full_sampling(img_size, kappa, std_decay, sample_size, n_steps, prior_std, noise_level, device)
+    alg_full_sampling(img_size, kappa, std_decay, sample_size, n_steps, prior_std, device)
 
     # prior_stds = [2.5]  # test various standard deviations for sampling
     # std_decays = [0.9]  # test various decay rates of standard deviation for sampling
