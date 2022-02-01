@@ -3,14 +3,13 @@ Experiment: find barycenter for a simple 3x3 setup.
 """
 import numpy as np
 import torch
-from torch.distributions.multivariate_normal import MultivariateNormal
 import ot
 import scipy.stats
 import time
 import gc
 
 from algorithm import algorithm
-from utils import safe_log, plot_trajectory, norm_sq
+from utils import safe_log, plot_trajectory, norm_sq, replace_zeros, get_sampler
 
 
 def get_cost_matrix(im_sz, device, dtype=torch.float32):
@@ -83,8 +82,7 @@ def experiment_pot(img_size, column_interval, n_steps, device, sample_size, prio
         cost_mat = cost_mat.numpy()
         cs = cs.numpy()
     else:
-        cs[cs == 0] = 1e-9
-        cs /= cs.sum(dim=-1, keepdim=True)
+        cs = replace_zeros(cs)
 
     if add_entropy:
         def get_reg_coeff():
@@ -147,11 +145,7 @@ def experiment_pot(img_size, column_interval, n_steps, device, sample_size, prio
         return r, objective_val, acc_r
 
     prior_cov = prior_var * torch.eye(img_size**2, dtype=dtype, device=device)
-    def get_sample(mean, cov, seed):
-        if seed is not None:
-            torch.manual_seed(seed)
-        distr = MultivariateNormal(loc=mean, covariance_matrix=cov)
-        return distr.sample((sample_size,))
+    get_sample = get_sampler(sample_size)
 
     def recalculate_cov(old_cov, sample, step, weights):
         factor = var_decay ** step if decay == 'exp' else var_decay / (step + var_decay)
@@ -165,17 +159,13 @@ def experiment_pot(img_size, column_interval, n_steps, device, sample_size, prio
         # Names and indices of elements of the list returned by 'get_info'
         info_names = [{'Objective': 1}, {'Accuracy of r': 2}]
         n_cols = 6
-        img_name = ('cov_' if empir_cov else '') + f"samples_{sample_size}_var_{prior_var}_decay_{var_decay}"
+        img_name = f"samples_{sample_size}_var_{prior_var}_decay_{var_decay}"
         if empir_cov:
             img_name = 'cov_' + img_name
         if device == 'cuda':
             img_name = 'GPU_' + img_name
 
-        if device == 'cpu':
-            r_opt = r_opt.numpy()
-        else:
-            r_opt[r_opt == 0] = 1e-9
-            r_opt /= r_opt.sum()
+        r_opt = r_opt.numpy() if device == 'cpu' else replace_zeros(r_opt)
         opt_val = get_optimal_value(device, cost_mat, cs, r_opt.numpy() if device == 'cpu' else r_opt)  # needed for displaying optimal value on plot
         plot_trajectory(trajectory, n_cols, img_size, img_name, info_names, opt_val=opt_val)
 

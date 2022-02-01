@@ -4,6 +4,8 @@ Auxiliary functions.
 import torch
 import matplotlib.pyplot as plt
 import pickle
+from sklearn.datasets import load_digits
+from torch.distributions.multivariate_normal import MultivariateNormal
 
 
 def safe_log(arr, minus_inf=-100.):
@@ -65,9 +67,11 @@ def plot_trajectory(trajectory, n_cols, img_sz, img_name, info_names, log_scale=
     # plot_every = int(n_steps / n_cols) + 1 if n_steps % n_cols else int(n_steps / n_cols)
     slope = n_steps / (n_cols - 1)
     iterations = [int(i * slope) for i in range(n_cols)]
-    barycenters = [trajectory[it][0].to('cpu') for it in iterations]  # [el[0] for el in trajectory[::plot_every]]
+    barycenters = [trajectory[it][0].to('cpu') for it in iterations] if info_names is not None\
+        else [trajectory[it].to('cpu') for it in iterations]
     show_barycenters(barycenters, img_sz, img_name, iterations=iterations)
-    plot_convergence(trajectory, img_name, info_names, log_scale=log_scale, opt_val=opt_val)
+    if info_names is not None:
+        plot_convergence(trajectory, img_name, info_names, log_scale=log_scale, opt_val=opt_val)
 
 
 def compare_trajectories(file_names, plot_names, info_names, n_cols, img_sz):
@@ -117,6 +121,48 @@ def compare_trajectories(file_names, plot_names, info_names, n_cols, img_sz):
 
     plt.tight_layout()
     plt.savefig(f"plots/5_comparison_convergence.png", bbox_inches='tight')
+
+
+def get_sampler(sample_size):
+    def get_sample(mean, cov, seed):
+        if seed is not None:
+            torch.manual_seed(seed)
+        distr = MultivariateNormal(loc=mean, covariance_matrix=cov)
+        return distr.sample((sample_size,))
+    return get_sample
+
+
+def load_data(m, src_digit, target_digit, device, noise=None):
+    digits = load_digits()
+
+    cs = []
+    r_prior = None
+    i = 0
+    while len(cs) < m:
+        digit = digits.target[i]
+        is_prior = r_prior is None and digit == src_digit
+        if is_prior or digit == target_digit:
+            img = torch.from_numpy(digits.data[i].astype('float32'))
+            if is_prior and noise is not None:
+                img += noise * torch.rand(*img.shape)
+            img /= img.sum()
+
+            # plt.figure()
+            # plt.imshow(im3.reshape(8, -1), cmap='binary')
+            if is_prior:
+                r_prior = img
+                # plt.savefig(f"r0.png")
+            else:
+                cs.append(img)
+                # plt.savefig(f"c{len(cs)}.png")
+        i += 1
+    return r_prior.to(device), torch.stack(cs).to(device)
+
+
+def replace_zeros(arr, replace_val=1e-9, sumdim=-1):
+    arr[arr == 0] = replace_val
+    arr /= arr.sum(dim=sumdim, keepdim=True)
+    return arr
 
 
 if __name__ == '__main__':
