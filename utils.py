@@ -40,8 +40,11 @@ def plot_convergence(trajectory, img_name, info_names, log_scale=False, opt_val=
     for i, names in enumerate(info_names):
         ax = axs[i]
         for name, idx in names.items():
-            ax.plot([el[idx] for el in trajectory[1:]], label=name)
+            ax.plot([el[idx].to('cpu') if isinstance(el[idx], torch.Tensor) else el[idx]
+                     for el in trajectory[1:]], label=name)
             if name == 'Objective' and opt_val is not None:
+                if isinstance(opt_val, torch.Tensor):
+                    opt_val = opt_val.to('cpu')
                 ax.hlines(y=opt_val, xmin=0, xmax=len(trajectory)-2, label='Optimal value')
         ax.yaxis.grid()
 
@@ -62,7 +65,7 @@ def plot_trajectory(trajectory, n_cols, img_sz, img_name, info_names, log_scale=
     # plot_every = int(n_steps / n_cols) + 1 if n_steps % n_cols else int(n_steps / n_cols)
     slope = n_steps / (n_cols - 1)
     iterations = [int(i * slope) for i in range(n_cols)]
-    barycenters = [trajectory[it][0] for it in iterations]  # [el[0] for el in trajectory[::plot_every]]
+    barycenters = [trajectory[it][0].to('cpu') for it in iterations]  # [el[0] for el in trajectory[::plot_every]]
     show_barycenters(barycenters, img_sz, img_name, iterations=iterations)
     plot_convergence(trajectory, img_name, info_names, log_scale=log_scale, opt_val=opt_val)
 

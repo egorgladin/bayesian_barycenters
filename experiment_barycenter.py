@@ -73,11 +73,18 @@ def get_optimal_value(device, cost_mat, cs, r_opt):
     return sum(wasser_dist)
 
 
-def experiment_pot(dtype, img_size, column_interval, n_steps, device, sample_size, prior_var, var_decay, noise_level=None, add_entropy=False,
-                   start_coef=20., decrease=0.25):
-    cost_mat = get_cost_matrix(img_size, device, dtype=dtype).numpy()
+def experiment_pot(img_size, column_interval, n_steps, device, sample_size, prior_var, var_decay, noise_level=None, add_entropy=False,
+                   start_coef=20., decrease=0.25, decay='exp', empir_cov=False, temperature=None, plot=False, track_time=False):
+    dtype = torch.float64 if device == 'cpu' else torch.float32  # avoid errors when converting from torch to numpy
+    cost_mat = get_cost_matrix(img_size, device, dtype=dtype)
     cs, r_opt = get_data_and_solution(device, dtype=dtype, size=img_size, column_interval=column_interval)
-    cs = cs.numpy()
+
+    if device == 'cpu':
+        cost_mat = cost_mat.numpy()
+        cs = cs.numpy()
+    else:
+        cs[cs == 0] = 1e-9
+        cs /= cs.sum(dim=-1, keepdim=True)
 
     if add_entropy:
         def get_reg_coeff():
@@ -92,21 +99,30 @@ def experiment_pot(dtype, img_size, column_interval, n_steps, device, sample_siz
 
     def objective(sample, reg_coef=None):
         # sample has shape (sample_size, n)
-        barycenters = torch.softmax(sample, dim=-1).numpy()
-        barycenters = np.ascontiguousarray(barycenters.T)  # shape (n, sample_size)
+        barycenters = torch.softmax(sample, dim=-1).T.contiguous()  # shape (n, sample_size)
+        if device == 'cpu':
+            barycenters = barycenters.numpy()
+        # barycenters = np.ascontiguousarray(barycenters.T)  # shape (n, sample_size)
         if barycenters.shape[-1] == 1:  # evaluate objective for single point
             barycenters = barycenters.flatten()
             single_sample = True
         else:  # evaluate objective for a sample of points
             single_sample = False
 
-        wasser_dist = [ot.emd2(c, barycenters, cost_mat) for c in cs]  # ot. bregman.sinkhorn2 , reg=0.1
+        if device == 'cpu':
+            wasser_dist = [ot.emd2(c, barycenters, cost_mat) for c in cs]
+        else:
+            wasser_dist = [ot.sinkhorn2(c, barycenters, cost_mat, reg=1e-2) for c in cs]
         entropy = reg_coef * scipy.stats.entropy(barycenters) if add_entropy and reg_coef else 0.  # shape (sample_size,)
 
         if single_sample:
             objective_val = sum(wasser_dist)
         else:  # wasser_dist is list of (sample_size,) tensors
-            objective_val = torch.tensor(wasser_dist, device=device, dtype=dtype).sum(dim=0)
+            objective_val = torch.tensor(wasser_dist, dtype=dtype) if device == 'cpu'\
+                else torch.vstack(wasser_dist)
+            objective_val = objective_val.sum(dim=0)
+            if temperature:
+                objective_val *= temperature
         return -objective_val + entropy  # minus because algorithm maximizes objective
 
     if noise_level is not None:
@@ -130,10 +146,7 @@ def experiment_pot(dtype, img_size, column_interval, n_steps, device, sample_siz
         objective_val = -objective(z.unsqueeze(0))
         return r, objective_val, acc_r
 
-    # Names and indices of elements of the list returned by 'get_info'
-    info_names = [{'Objective': 1}, {'Accuracy of r': 2}]
-
-    prior_cov = prior_var * torch.eye(img_size**2, dtype=dtype)
+    prior_cov = prior_var * torch.eye(img_size**2, dtype=dtype, device=device)
     def get_sample(mean, cov, seed):
         if seed is not None:
             torch.manual_seed(seed)
@@ -141,20 +154,36 @@ def experiment_pot(dtype, img_size, column_interval, n_steps, device, sample_siz
         return distr.sample((sample_size,))
 
     def recalculate_cov(old_cov, sample, step, weights):
-        # empir_cov = torch.cov(sample.T, aweights=weights)
-        return var_decay * old_cov  # empir_cov
+        factor = var_decay ** step if decay == 'exp' else var_decay / (step + var_decay)
+        matrix = torch.cov(sample.T, aweights=weights) if empir_cov else prior_cov
+        return factor * matrix
 
     trajectory = algorithm(z_prior, prior_cov, get_sample, n_steps, objective,
-                           recalculate_cov, seed=0, get_info=get_info, track_time=False, hyperparam=reg_coefs)
-    n_cols = 6
-    img_name = f"samples_{sample_size}_var_{prior_var}_decay_{var_decay}"
-    # opt_val = get_optimal_value(device, cost_mat, cs, r_opt.numpy())  # needed for displaying optimal value on plot
-    # plot_trajectory(trajectory, n_cols, img_size, img_name, info_names, opt_val=opt_val)
-    return sum([info[2] for info in trajectory[-3:]]) / 3, trajectory
+                           recalculate_cov, seed=0, get_info=get_info, track_time=track_time, hyperparam=reg_coefs)
+
+    if plot:
+        # Names and indices of elements of the list returned by 'get_info'
+        info_names = [{'Objective': 1}, {'Accuracy of r': 2}]
+        n_cols = 6
+        img_name = ('cov_' if empir_cov else '') + f"samples_{sample_size}_var_{prior_var}_decay_{var_decay}"
+        if empir_cov:
+            img_name = 'cov_' + img_name
+        if device == 'cuda':
+            img_name = 'GPU_' + img_name
+
+        if device == 'cpu':
+            r_opt = r_opt.numpy()
+        else:
+            r_opt[r_opt == 0] = 1e-9
+            r_opt /= r_opt.sum()
+        opt_val = get_optimal_value(device, cost_mat, cs, r_opt.numpy() if device == 'cpu' else r_opt)  # needed for displaying optimal value on plot
+        plot_trajectory(trajectory, n_cols, img_size, img_name, info_names, opt_val=opt_val)
+
+    else:
+        return sum([info[2] for info in trajectory[-3:]]) / 3, trajectory
 
 
-def main():
-    dtype = torch.float64  # avoid errors when converting from torch to numpy
+def pot_grid_search():
     img_size = 5  # image size is DxD
     column_interval = 1
     n_steps = 50  # number of iterations
@@ -179,7 +208,7 @@ def main():
         for prior_var in prior_vars:
             for var_decay in var_decays:
                 start = time.time()
-                acc_r, traj = experiment_pot(dtype, img_size, column_interval, n_steps, device, sample_size, prior_var, var_decay)
+                acc_r, traj = experiment_pot(img_size, column_interval, n_steps, device, sample_size, prior_var, var_decay)
                 print(f"Experiment took {time.time() - start:.2f} s")
                 if acc_r < best_acc:
                     best_acc = acc_r
@@ -197,6 +226,25 @@ def main():
     # for std_decay in std_decays:
     #     for prior_std in prior_stds:
     #          experiment_pot(std_decay, sample_size, n_steps, float(prior_std), noise_level, device, add_entropy=False)
+
+
+def pot_gpu():
+    img_size = 5
+    column_interval = 1
+    n_steps = 50  # number of iterations
+
+    # Hyperparameters
+    device = 'cuda'
+    sample_size = 8 ** 4
+    prior_var = 8.  # initial variance of prior
+    var_decay = 20.
+
+    experiment_pot(img_size, column_interval, n_steps, device, sample_size, prior_var, var_decay, decay='lin', plot=True, track_time=True)
+
+
+def main():
+    # pot_grid_search()
+    pot_gpu()
 
 
 if __name__ == "__main__":
