@@ -16,7 +16,7 @@ def get_cost_matrix(im_sz, device, dtype=torch.float32):
     """
     Compute ground cost matrix for images.
 
-    :param im_sz: positive int
+    :param im_sz: positive int equal to width = height of an image
     :param device: 'cpu' or 'cuda'
     :return: (im_sz^2, im_sz^2) tensor
     """
@@ -100,7 +100,6 @@ def experiment_pot(img_size, column_interval, n_steps, device, sample_size, prio
         barycenters = torch.softmax(sample, dim=-1).T.contiguous()  # shape (n, sample_size)
         if device == 'cpu':
             barycenters = barycenters.numpy()
-        # barycenters = np.ascontiguousarray(barycenters.T)  # shape (n, sample_size)
         if barycenters.shape[-1] == 1:  # evaluate objective for single point
             barycenters = barycenters.flatten()
             single_sample = True
@@ -166,7 +165,7 @@ def experiment_pot(img_size, column_interval, n_steps, device, sample_size, prio
             img_name = 'GPU_' + img_name
 
         r_opt = r_opt.numpy() if device == 'cpu' else replace_zeros(r_opt)
-        opt_val = get_optimal_value(device, cost_mat, cs, r_opt.numpy() if device == 'cpu' else r_opt)  # needed for displaying optimal value on plot
+        opt_val = get_optimal_value(device, cost_mat, cs, r_opt)  # needed for displaying optimal value on plot
         plot_trajectory(trajectory, n_cols, img_size, img_name, info_names, opt_val=opt_val)
 
     else:
@@ -174,16 +173,16 @@ def experiment_pot(img_size, column_interval, n_steps, device, sample_size, prio
 
 
 def pot_grid_search():
-    img_size = 5  # image size is DxD
+    img_size = 5  # width = height of an image
     column_interval = 1
-    n_steps = 50  # number of iterations
+    n_steps = 10  # number of iterations
 
     n_cols = 6
     info_names = [{'Objective': 1}, {'Accuracy of r': 2}]
 
     # Hyperparameters
     device = 'cpu'
-    sample_sizes = [8 ** 4]  # [8 ** i for i in range(3, 6)]
+    sample_sizes = [8 ** 3]  # [8 ** i for i in range(3, 6)]
     # sample_size = 1000
     prior_vars = [2. ** i for i in range(3, 5)]
     # prior_var = 7.  # initial variance of prior
@@ -219,12 +218,12 @@ def pot_grid_search():
 
 
 def pot_gpu():
-    img_size = 5
+    img_size = 5  # width = height of an image
     column_interval = 1
     n_steps = 50  # number of iterations
 
     # Hyperparameters
-    device = 'cuda'
+    device = 'cpu'
     sample_size = 8 ** 4
     prior_var = 8.  # initial variance of prior
     var_decay = 20.

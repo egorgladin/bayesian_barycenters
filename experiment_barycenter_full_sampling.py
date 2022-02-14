@@ -151,7 +151,7 @@ def alg_full_sampling(img_size, kappa, var_decay, sample_size, n_steps, prior_st
 
 
 def main():
-    img_size = 3  # image size is DxD
+    img_size = 3  # width = height of an image
     n_steps = 200  # number of iterations
 
     # Hyperparameters
