@@ -57,6 +57,12 @@ def map_to_simplex(theta, n_):
     return r, Xs.reshape(-1, n_, n_)
 
 
+def map_sample_to_simplex(sample, n_, sample_size):
+    rs = torch.softmax(sample[:, :n_], dim=-1)
+    Xs = torch.softmax(sample[:, n_:].reshape(sample_size, -1, n_**2), dim=-1).reshape(sample_size, -1, n_, n_)
+    return rs, Xs
+
+
 def get_optimal_plans(device):
     """
     Get optimal plans for simple 3x3 images.
@@ -93,11 +99,12 @@ def alg_full_sampling(img_size, kappa, var_decay, sample_size, n_steps, prior_st
     kappas = [torch.tensor(kappa, device=device)] * 2
 
     def objective(sample):
+        # sample has shape (sample_size, n + m*n^2)
         sample_size = sample.shape[0]
         values = torch.empty(sample_size, device=device)
+        rs, Xss = map_sample_to_simplex(sample, n, sample_size)
         for i in range(sample_size):
-            r, Xs = map_to_simplex(sample[i], n)
-            values[i] = barycenter_objective(r, Xs, cost_mat, kappas, cs)
+            values[i] = barycenter_objective(rs[i], Xss[i], cost_mat, kappas, cs)
         return -values  # minus because the algorithm maximizes the objective
 
     # Define initial approx. barycenter and transport plans as well as their counterparts in R^n
