@@ -19,17 +19,27 @@ def norm_sq(tensor):
     return torch.square(tensor).sum().item()
 
 
+def show_barycenter(r, fname):
+    img = r.cpu().numpy().reshape(8, -1)
+    plt.imshow(img, cmap='binary')
+    plt.savefig(f"plots/{fname}.png", bbox_inches='tight')
+    plt.close()
+
+
 def show_barycenters(barycenters, img_sz, img_name, iterations=None):
     """Display several barycenters across iterations."""
     fig, ax = plt.subplots(nrows=1, ncols=len(barycenters), figsize=(16, 4))
     for i, z in enumerate(barycenters):
         img = torch.softmax(z, dim=-1).cpu().numpy().reshape(img_sz, -1)
         ax[i].imshow(img, cmap='binary')
+        plt.xticks([])
+        plt.yticks([])
 
     if iterations is not None:
         for i, iter in enumerate(iterations):
             ax[i].title.set_text(f"Iteration {iter}")
 
+    # plt.tick_params(axis='both', which='both', bottom='off', top='off', labelbottom='off', right='off', left='off', labelleft='off')
     plt.savefig(f"plots/bary_{img_name}.png", bbox_inches='tight')
     plt.close()
 
@@ -42,11 +52,11 @@ def plot_convergence(trajectory, img_name, info_names, log_scale=False, opt_val=
     for i, names in enumerate(info_names):
         ax = axs[i]
         for name, idx in names.items():
-            ax.plot([el[idx].to('cpu') if isinstance(el[idx], torch.Tensor) else el[idx]
+            ax.plot([el[idx].to('cpu').numpy() if isinstance(el[idx], torch.Tensor) else el[idx]
                      for el in trajectory[1:]], label=name)
             if name == 'Objective' and opt_val is not None:
                 if isinstance(opt_val, torch.Tensor):
-                    opt_val = opt_val.to('cpu')
+                    opt_val = opt_val.to('cpu').numpy()
                 ax.hlines(y=opt_val, xmin=0, xmax=len(trajectory)-2, label='Optimal value')
         ax.yaxis.grid()
 
