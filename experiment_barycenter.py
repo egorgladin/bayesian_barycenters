@@ -38,19 +38,20 @@ def get_data_and_solution(device, dtype=torch.float32, size=3, column_interval=1
     :param device: 'cuda' or 'cpu'
     :return: list of (2, 9) tensor (data points) and (9,) tensor (barycenter)
     """
-    barycenter = None
     cs = []
     for i in range(0, size, column_interval):
-        c = torch.zeros((size, size), device=device, dtype=dtype)
-        c[:, i] = 1. / size
-        c = c.flatten()
         if i == size // 2:
-            barycenter = c
+            pass
         else:
-            cs.append(c)
+            c = torch.zeros((size, size), device=device, dtype=dtype)
+            c[:, i] = 1. / size
+            cs.append(c.flatten())
+
+    barycenter = torch.zeros((size, size), device=device, dtype=dtype)
+    barycenter[:, size // 2] = 1. / size
 
     cs = torch.stack(cs)
-    return cs, barycenter
+    return cs, barycenter.flatten()
 
 
 def get_init_barycenter(r_opt, noise_level, seed=None):

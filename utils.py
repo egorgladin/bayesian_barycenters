@@ -2,7 +2,13 @@
 Auxiliary functions.
 """
 import torch
+import numpy as np
+
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from matplotlib import cm
+from matplotlib.ticker import LinearLocator, FormatStrFormatter, FuncFormatter, MaxNLocator
+
 import pickle
 from sklearn.datasets import load_digits
 from torch.distributions.multivariate_normal import MultivariateNormal
@@ -133,12 +139,57 @@ def compare_trajectories(file_names, plot_names, info_names, n_cols, img_sz):
     plt.savefig(f"plots/5_comparison_convergence.png", bbox_inches='tight')
 
 
+def plot3d(X, Y, Zs, kappas, sample_size):
+    fig = plt.figure(figsize=plt.figaspect(0.33))
+    # ax = fig.gca(projection='3d')
+
+    X, Y = np.meshgrid(X, Y)
+
+    def log_tick_formatter_x(val, pos=None):
+        return f"{int(2**val)}"
+
+    def log_tick_formatter_y(val, pos=None):
+        return f"{round(0.9**val, 2)}"
+
+    # Plot the first surface.
+    ax1 = fig.add_subplot(1, 3, 1, projection='3d')
+    ax2 = fig.add_subplot(1, 3, 2, projection='3d')
+    ax3 = fig.add_subplot(1, 3, 3, projection='3d')
+    axes = [ax1, ax2, ax3]
+    for i, ax in enumerate(axes):
+        Z = Zs[i]
+        surf = ax.plot_surface(X, Y, Z, cmap=cm.coolwarm,
+                               linewidth=0, antialiased=False)
+        # Customize the z axis.
+        ax.set_zlim(0., 1.)
+        ax.zaxis.set_major_locator(LinearLocator(6))
+        ax.zaxis.set_major_formatter(FormatStrFormatter('%.02f'))
+
+        ax.xaxis.set_major_formatter(FuncFormatter(log_tick_formatter_x))
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+
+        ax.yaxis.set_major_formatter(FuncFormatter(log_tick_formatter_y))
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+
+        ax.set_xlabel('Initial var')
+        ax.set_ylabel('Var decay')
+
+        ax.title.set_text(f"kappa {kappas[i]}")
+
+    fig.suptitle(f'sample_size {sample_size}', fontsize=16)
+
+    # Add a color bar which maps values to colors.
+    fig.colorbar(surf, shrink=0.5, aspect=8)
+    plt.savefig(f"plots/dual3d_sample_size_{sample_size}.png")
+
+
 def get_sampler(sample_size):
     def get_sample(mean, cov, seed):
         if seed is not None:
             torch.manual_seed(seed)
         distr = MultivariateNormal(loc=mean, covariance_matrix=cov)
-        return distr.sample((sample_size,))
+        sample = distr.sample((sample_size,))
+        return sample
     return get_sample
 
 

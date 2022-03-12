@@ -32,10 +32,12 @@ def algorithm(prior_mean, prior_cov, get_sample, n_steps, objective,
         sample = get_sample(prior_mean, prior_cov, seed + step)
         objective_values = objective(sample, next(hyperparam)) if hyperparam else objective(sample)  # (sample_size,)
         weights = torch.softmax(objective_values, dim=-1)  # (sample_size,)
+        del objective_values
 
         prior_mean = weights @ sample
         prior_cov = recalculate_cov(prior_cov, sample, step, weights)
         del sample
+        del weights
         gc.collect()
         trajectory.append(prior_mean.clone() if get_info is None else get_info(prior_mean))
 

@@ -2,51 +2,52 @@ import torch
 import time
 import gc
 
-from mpl_toolkits.mplot3d import Axes3D
-import matplotlib.pyplot as plt
-from matplotlib import cm
-from matplotlib.ticker import LinearLocator, FormatStrFormatter, FuncFormatter, MaxNLocator
 import numpy as np
 
 from algorithm import algorithm
 from experiment_barycenter import get_cost_matrix, get_data_and_solution
-from utils import plot_trajectory, norm_sq, get_sampler
+from utils import plot_trajectory, norm_sq, get_sampler, plot3d
 
 
+def get_factor(decay, var_decay, step):
+    if decay == 'exp':
+        return var_decay ** step
+    elif decay == 'lin':
+        return var_decay / (step + var_decay)
+    else:
+        return var_decay / (step + np.sqrt(var_decay))
 
-def run_experiment(prior_var, var_decay, n_steps, sample_size, kappa, gamma, decay='exp', plot=True):
-    img_size = 3
+
+def run_experiment(img_size, device, prior_var, var_decay, n_steps, sample_size, kappa, gamma,
+                   decay='exp', plot=True, empir_cov=False):
     n = img_size ** 2  # dimensionality of barycenter
-    device = 'cpu'
     dtype = torch.float32
 
     cost_mat = get_cost_matrix(img_size, device, dtype=dtype)
-    cs, r_opt = get_data_and_solution(device)
+    cs, r_opt = get_data_and_solution(device, size=img_size, column_interval=1 if img_size <= 5 else 2)
+    m = cs.shape[0]
 
     def objective(sample):
-        # 'sample' has size (M, 4n), where M is sample size or 1
+        # 'sample' has size (M, 2*m*n), where M is sample size or 1
         M = sample.shape[0]
 
-        lambda1 = sample[:, :n]  # (M, n)
-        lambda2 = sample[:, n:2*n]  # (M, n)
-        mu1 = sample[:, 2*n:3*n]  # (M, n)
-        mu2 = sample[:, 3*n:]  # (M, n)
+        lambdas = [sample[:, i * n:(i + 1) * n] for i in range(m)]
+        lambdas = torch.stack(lambdas, dim=0)  # (m, M, n)
 
-        val1 = (lambda1 + lambda2) / kappa  # (M, n)
+        mus = [sample[:, (m+i)*n:(m+i+1)*n] for i in range(m)]
+        mus = torch.stack(mus, dim=0)  # (m, M, n)
+
+        val1 = (lambdas.sum(dim=0)) / kappa  # (M, n)
         term1 = -kappa * torch.logsumexp(val1, dim=-1)  # (M,)
 
-        val2 = torch.stack((lambda1, lambda2), dim=1) * cs  # (M, 2, n)
-        term2 = -val2.sum(dim=(1, 2))  # (M,)
+        val2 = lambdas * cs.unsqueeze(1)  # (m, M, n)
+        term2 = -val2.sum(dim=(0, 2))  # (M,)
 
-        mat1 = cost_mat + lambda1.reshape(M, n, 1).expand(-1, -1, n)\
-                        + mu1.reshape(M, 1, n).expand(-1, n, -1)  # (M, n, n)
+        mat = cost_mat + lambdas.unsqueeze(3).expand(-1, -1, -1, n)\
+                       + mus.unsqueeze(2).expand(-1, -1, n, -1)  # (m, M, n, n)
 
-        mat2 = cost_mat + lambda2.reshape(M, n, 1).expand(-1, -1, n)\
-                        + mu2.reshape(M, 1, n).expand(-1, n, -1)  # (M, n, n)
-
-        mat2 = mat2.reshape(M, -1)  # (M, n^2)
-        mat1 = mat1.reshape(M, -1)  # (M, n^2)
-        term3 = -gamma * (torch.logsumexp(mat1, dim=-1) + torch.logsumexp(mat2, dim=-1))  # (M,)
+        mat = mat.reshape(m, M, -1)  # (m, M, n^2)
+        term3 = -gamma * torch.logsumexp(mat, dim=-1).sum(dim=0)  # (M,)
 
         obj_val = term1 + term2 + term3
         return obj_val
@@ -61,14 +62,21 @@ def run_experiment(prior_var, var_decay, n_steps, sample_size, kappa, gamma, dec
         return r, objective_val, acc_r
 
     torch.manual_seed(42)
-    z_prior = torch.normal(torch.zeros(4 * n), 10.)
+    z_prior = torch.normal(torch.zeros(2 * m * n, device=device), 10.)
 
-    prior_cov = prior_var * torch.eye(4 * n, dtype=dtype, device=device)
+    prior_cov = prior_var * torch.eye(2 * m * n, dtype=dtype, device=device)
     get_sample = get_sampler(sample_size)
 
-    def recalculate_cov(old_cov, sample, step, weights):
-        factor = var_decay ** step if decay == 'exp' else var_decay / (step + var_decay)
-        return factor * prior_cov
+    if empir_cov:
+        def recalculate_cov(old_cov, sample, step, weights):
+            matrix = torch.cov(sample.T, aweights=weights) if empir_cov else prior_cov
+            diag = torch.min(torch.diag(matrix))
+            factor = get_factor(decay, var_decay, step)
+            return factor * (matrix / diag)
+    else:
+        def recalculate_cov(old_cov, sample, step, weights):
+            factor = get_factor(decay, var_decay, step)
+            return factor * prior_cov
 
     trajectory = algorithm(z_prior, prior_cov, get_sample, n_steps, objective,
                            recalculate_cov, seed=0, get_info=get_info)
@@ -84,65 +92,39 @@ def run_experiment(prior_var, var_decay, n_steps, sample_size, kappa, gamma, dec
         return sum([info[2] for info in trajectory[-5:]]) / 5, trajectory
 
 
-def plot3d(X, Y, Zs, kappas, sample_size):
-    fig = plt.figure(figsize=plt.figaspect(0.33))
-    # ax = fig.gca(projection='3d')
-
-    X, Y = np.meshgrid(X, Y)
-
-    def log_tick_formatter_x(val, pos=None):
-        return f"{int(2**val)}"
-
-    def log_tick_formatter_y(val, pos=None):
-        return f"{round(0.9**val, 2)}"
-
-    # Plot the first surface.
-    ax1 = fig.add_subplot(1, 3, 1, projection='3d')
-    ax2 = fig.add_subplot(1, 3, 2, projection='3d')
-    ax3 = fig.add_subplot(1, 3, 3, projection='3d')
-    axes = [ax1, ax2, ax3]
-    for i, ax in enumerate(axes):
-        Z = Zs[i]
-        surf = ax.plot_surface(X, Y, Z, cmap=cm.coolwarm,
-                               linewidth=0, antialiased=False)
-        # Customize the z axis.
-        ax.set_zlim(0., 1.)
-        ax.zaxis.set_major_locator(LinearLocator(6))
-        ax.zaxis.set_major_formatter(FormatStrFormatter('%.02f'))
-
-        ax.xaxis.set_major_formatter(FuncFormatter(log_tick_formatter_x))
-        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-
-        ax.yaxis.set_major_formatter(FuncFormatter(log_tick_formatter_y))
-        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-
-        ax.set_xlabel('Initial var')
-        ax.set_ylabel('Var decay')
-
-        ax.title.set_text(f"kappa {kappas[i]}")
-
-    fig.suptitle(f'sample_size {sample_size}', fontsize=16)
-
-    # Add a color bar which maps values to colors.
-    fig.colorbar(surf, shrink=0.5, aspect=8)  # , pad=0.15
-    plt.savefig(f"plots/dual3d_sample_size_{sample_size}.png")  #, bbox_inches='tight')
-
-
-def best_params():
-    n_steps = 30
+def seven_by_seven():
+    img_size = 7
+    device = 'cpu'
+    n_steps = 50
 
     # Hyperparameters
-    sample_size = 64
-    prior_var = 2. ** 6
-    var_decay = 0.9 ** 4
+    sample_size = 2 ** 12
+    prior_var = 32.
+    var_decay = 3
     kappa = 0.01
 
     gamma = kappa
-    run_experiment(prior_var, var_decay, n_steps, sample_size, kappa, gamma)
+    run_experiment(img_size, device, prior_var, var_decay, n_steps, sample_size,
+                   kappa, gamma, decay='sqrt', empir_cov=False)
 
+
+def best_params():
+    img_size = 3
+    device = 'cpu'
+    n_steps = 30
+
+    # Hyperparameters
+    sample_size = 2**10
+    prior_var = 2. ** 4
+    var_decay = 0.9  # ** 2
+    kappa = 0.02
+
+    gamma = kappa
+    run_experiment(img_size, device, prior_var, var_decay, n_steps, sample_size, kappa, gamma)
 
 
 def grid_search():
+    device = 'cpu'
     n_steps = 30
     img_size = 3
 
@@ -172,7 +154,7 @@ def grid_search():
                 for y, var_decay in enumerate(var_decays):
                     print("      var_decay:", var_decay)
                     start = time.time()
-                    acc_r, traj = run_experiment(prior_var, var_decay, n_steps, sample_size, kappa, gamma, plot=False)
+                    acc_r, traj = run_experiment(img_size, device, prior_var, var_decay, n_steps, sample_size, kappa, gamma, plot=False)
                     # print(f"      exper. took {time.time() - start:.2f} s")
                     print(f"         accuracy {acc_r}")
                     acuracies[y, x] = acc_r
@@ -194,3 +176,4 @@ def grid_search():
 if __name__ == "__main__":
     # grid_search()
     best_params()
+    # seven_by_seven()
