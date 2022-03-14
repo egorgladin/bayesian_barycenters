@@ -24,8 +24,9 @@ def run_experiment(img_size, device, prior_var, var_decay, n_steps, sample_size,
     dtype = torch.float32
 
     cost_mat = get_cost_matrix(img_size, device, dtype=dtype)
-    cs, r_opt = get_data_and_solution(device, size=img_size, column_interval=1 if img_size <= 5 else 2)
+    cs, r_opt = get_data_and_solution(device, size=img_size, column_interval=1 if img_size == 3 else 2)
     m = cs.shape[0]
+    print("m =", m)
 
     def objective(sample):
         # 'sample' has size (M, 2*m*n), where M is sample size or 1
@@ -47,14 +48,16 @@ def run_experiment(img_size, device, prior_var, var_decay, n_steps, sample_size,
                        + mus.unsqueeze(2).expand(-1, -1, n, -1)  # (m, M, n, n)
 
         mat = mat.reshape(m, M, -1)  # (m, M, n^2)
-        term3 = -gamma * torch.logsumexp(mat, dim=-1).sum(dim=0)  # (M,)
+        term3 = -gamma * torch.logsumexp(mat / gamma, dim=-1).sum(dim=0)  # (M,)
 
         obj_val = term1 + term2 + term3
         return obj_val
 
     def get_info(z):
-        # 'z' has size (4n,)
-        lambda_sum = z[:n] + z[n:2*n]  # (n,)
+        # 'z' has size (2 * m * n,)
+        lambdas = [z[i * n:(i + 1) * n] for i in range(m)]
+        lambdas = torch.stack(lambdas, dim=0)  # (m, n)
+        lambda_sum = lambdas.sum(dim=0)  # (n,)
         r = torch.softmax(lambda_sum, dim=-1)  # (n,)
 
         acc_r = norm_sq(r - r_opt)  # distance between current approximation and true barycenter
@@ -93,12 +96,12 @@ def run_experiment(img_size, device, prior_var, var_decay, n_steps, sample_size,
 
 
 def seven_by_seven():
-    img_size = 7
+    img_size = 5
     device = 'cpu'
-    n_steps = 50
+    n_steps = 100
 
     # Hyperparameters
-    sample_size = 2 ** 12
+    sample_size = 2 ** 11
     prior_var = 32.
     var_decay = 3
     kappa = 0.01
@@ -111,7 +114,7 @@ def seven_by_seven():
 def best_params():
     img_size = 3
     device = 'cpu'
-    n_steps = 30
+    n_steps = 60
 
     # Hyperparameters
     sample_size = 2**10
