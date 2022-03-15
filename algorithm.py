@@ -7,7 +7,7 @@ import gc
 
 
 def algorithm(prior_mean, prior_cov, get_sample, n_steps, objective,
-              recalculate_cov, seed=None, get_info=None, track_time=False, hyperparam=None):
+              recalculate_cov, seed=None, get_info=None, track_time=False, hyperparam=None, temperature=1.):
     """
     Maximize objective by the bayesian algorithm with sampling.
 
@@ -31,7 +31,7 @@ def algorithm(prior_mean, prior_cov, get_sample, n_steps, objective,
             start = time.time()
         sample = get_sample(prior_mean, prior_cov, seed + step)
         objective_values = objective(sample, next(hyperparam)) if hyperparam else objective(sample)  # (sample_size,)
-        weights = torch.softmax(objective_values, dim=-1)  # (sample_size,)
+        weights = torch.softmax(temperature * objective_values, dim=-1)  # (sample_size,)
         del objective_values
 
         prior_mean = weights @ sample
