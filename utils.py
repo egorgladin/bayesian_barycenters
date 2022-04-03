@@ -32,20 +32,26 @@ def show_barycenter(r, fname):
     plt.close()
 
 
-def show_barycenters(barycenters, img_sz, img_name, iterations=None):
+def show_barycenters(barycenters, img_sz, img_name, iterations=None, use_softmax=True, scaling=None):
     """Display several barycenters across iterations."""
-    fig, ax = plt.subplots(nrows=1, ncols=len(barycenters), figsize=(16, 4))
+    fig, axes = plt.subplots(nrows=1, ncols=len(barycenters), figsize=(16, 4))
     for i, z in enumerate(barycenters):
-        img = torch.softmax(z, dim=-1).cpu().numpy().reshape(img_sz, -1)
-        ax[i].imshow(img, cmap='binary')
-        plt.xticks([])
-        plt.yticks([])
+        img = (torch.softmax(z, dim=-1) if use_softmax else z).cpu().numpy().reshape(img_sz, -1)
+        ax = axes[i] if len(barycenters) > 1 else axes
+        if np.allclose(img, img[0, 0]) or scaling == 'none':
+            ax.imshow(img, cmap='binary', vmin=0, vmax=1)
+        elif scaling == 'partial':
+            ax.imshow(img, cmap='binary', vmin=0)
+        else:
+            ax.imshow(img, cmap='binary')
+        ax.set_xticks([])
+        ax.set_yticks([])
 
-    if iterations is not None:
-        for i, iter in enumerate(iterations):
-            ax[i].title.set_text(f"Iteration {iter}")
+        if iterations is not None:
+            it = iterations[i]
+            title = f"Iteration {it}" if isinstance(it, int) else it
+            ax.title.set_text(title)
 
-    # plt.tick_params(axis='both', which='both', bottom='off', top='off', labelbottom='off', right='off', left='off', labelleft='off')
     plt.savefig(f"plots/bary_{img_name}.png", bbox_inches='tight')
     plt.close()
 
@@ -59,7 +65,7 @@ def plot_convergence(trajectory, img_name, info_names, log_scale=False, opt_val=
         ax = axs[i]
         for name, idx in names.items():
             ax.plot([el[idx].to('cpu').numpy() if isinstance(el[idx], torch.Tensor) else el[idx]
-                     for el in trajectory[1:]], label=name)
+                     for el in trajectory], label=name)
             if name == 'Objective' and opt_val is not None:
                 if isinstance(opt_val, torch.Tensor):
                     opt_val = opt_val.to('cpu').numpy()
@@ -74,7 +80,8 @@ def plot_convergence(trajectory, img_name, info_names, log_scale=False, opt_val=
     plt.savefig(f"plots/convergence_{img_name}.png", bbox_inches='tight')
 
 
-def plot_trajectory(trajectory, n_cols, img_sz, img_name, info_names, log_scale=False, opt_val=None):
+def plot_trajectory(trajectory, n_cols, img_sz, img_name, info_names, log_scale=False, opt_val=None,
+                    use_softmax=True, scaling=None):
     """Display several barycenters and plot other info stored in trajectory."""
     with open(f'pickled/trajectory_{img_name}.pickle', 'wb') as handle:
         pickle.dump(trajectory, handle)
@@ -85,7 +92,7 @@ def plot_trajectory(trajectory, n_cols, img_sz, img_name, info_names, log_scale=
     iterations = [int(i * slope) for i in range(n_cols)]
     barycenters = [trajectory[it][0].to('cpu') for it in iterations] if info_names is not None\
         else [trajectory[it].to('cpu') for it in iterations]
-    show_barycenters(barycenters, img_sz, img_name, iterations=iterations)
+    show_barycenters(barycenters, img_sz, img_name, iterations=iterations, use_softmax=use_softmax, scaling=scaling)
     if info_names is not None:
         plot_convergence(trajectory, img_name, info_names, log_scale=log_scale, opt_val=opt_val)
 
@@ -191,6 +198,28 @@ def get_sampler(sample_size):
         sample = distr.sample((sample_size,))
         return sample
     return get_sample
+
+
+def get_factor(decay, var_decay, step):
+    if decay == 'exp':
+        return var_decay ** step
+    elif decay == 'lin':
+        return var_decay / (step + var_decay)
+    else:
+        return var_decay / (step + np.sqrt(var_decay))
+
+
+def get_empir_cov(sample, step, weights, decay, var_decay):
+    matrix = torch.cov(sample.T, aweights=weights)
+    print(f'Cov matrix norm: {torch.linalg.matrix_norm(matrix, 2)}')
+    # diag = torch.min(torch.diag(matrix))
+    factor = get_factor(decay, var_decay, step)
+    return factor * matrix  # (matrix / diag)
+
+
+def scale_cov(step, decay, var_decay, prior_cov):
+    factor = get_factor(decay, var_decay, step)
+    return factor * prior_cov
 
 
 def load_data(m, src_digit, target_digit, device, noise=None):

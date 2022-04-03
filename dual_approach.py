@@ -8,16 +8,7 @@ import numpy as np
 
 from algorithm import algorithm
 from experiment_barycenter import get_cost_matrix, get_data_and_solution
-from utils import plot_trajectory, norm_sq, get_sampler, plot3d
-
-
-def get_factor(decay, var_decay, step):
-    if decay == 'exp':
-        return var_decay ** step
-    elif decay == 'lin':
-        return var_decay / (step + var_decay)
-    else:
-        return var_decay / (step + np.sqrt(var_decay))
+from utils import plot_trajectory, norm_sq, get_sampler, plot3d, get_empir_cov, scale_cov
 
 
 def run_experiment(img_size, device, prior_var, var_decay, n_steps, sample_size, kappa, gamma,
@@ -73,17 +64,9 @@ def run_experiment(img_size, device, prior_var, var_decay, n_steps, sample_size,
     prior_cov = prior_var * torch.eye(2 * m * n, dtype=dtype, device=device)
     get_sample = get_sampler(sample_size)
 
-    if empir_cov:
-        def recalculate_cov(old_cov, sample, step, weights):
-            matrix = torch.cov(sample.T, aweights=weights)
-            print(f'Cov matrix norm: {torch.linalg.matrix_norm(matrix, 2)}')
-            # diag = torch.min(torch.diag(matrix))
-            factor = get_factor(decay, var_decay, step)
-            return factor * matrix  # (matrix / diag)
-    else:
-        def recalculate_cov(old_cov, sample, step, weights):
-            factor = get_factor(decay, var_decay, step)
-            return factor * prior_cov
+    def recalculate_cov(old_cov, sample, step, weights):
+        return get_empir_cov(sample, step, weights, decay, var_decay)\
+            if empir_cov else scale_cov(step, decay, var_decay, prior_cov)
 
     trajectory = algorithm(z_prior, prior_cov, get_sample, n_steps, objective,
                            recalculate_cov, seed=0, get_info=get_info, temperature=temperature)
@@ -95,7 +78,7 @@ def run_experiment(img_size, device, prior_var, var_decay, n_steps, sample_size,
         img_name = f"sz_{img_size}_dual_samp_{sample_size}_var_{prior_var}_dec_{var_decay}_kap_{kappa}_gam_{gamma}_temp_{temperature}"
         img_name += '_empir' if empir_cov else ''
 
-        plot_trajectory(trajectory, n_cols, img_size, img_name, info_names)
+        plot_trajectory(trajectory, n_cols, img_size, img_name, info_names, use_softmax=False)
     else:
         return sum([info[2] for info in trajectory[-5:]]) / 5, trajectory
 
