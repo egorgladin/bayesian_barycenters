@@ -3,6 +3,7 @@ Auxiliary functions.
 """
 import torch
 import numpy as np
+from math import ceil
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -34,10 +35,17 @@ def show_barycenter(r, fname):
 
 def show_barycenters(barycenters, img_sz, img_name, iterations=None, use_softmax=True, scaling=None):
     """Display several barycenters across iterations."""
-    fig, axes = plt.subplots(nrows=1, ncols=len(barycenters), figsize=(16, 4))
-    for i, z in enumerate(barycenters):
+    n_bary = len(barycenters)
+    nrows, ncols = ceil(n_bary / 10), min(n_bary, 10)
+    figsize = (ncols * 3, nrows * 4)
+
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)  # , figsize=(16, 4)
+    for i, ax in enumerate(axes.flat):
+        if i >= n_bary:
+            break
+        z = barycenters[i]
         img = (torch.softmax(z, dim=-1) if use_softmax else z).cpu().numpy().reshape(img_sz, -1)
-        ax = axes[i] if len(barycenters) > 1 else axes
+        # ax = next(axes.flat)  # axes[i] if n_bary > 1 else axes
         if np.allclose(img, img[0, 0]) or scaling == 'none':
             ax.imshow(img, cmap='binary', vmin=0, vmax=1)
         elif scaling == 'partial':
@@ -222,7 +230,7 @@ def scale_cov(step, decay, var_decay, prior_cov):
     return factor * prior_cov
 
 
-def load_data(m, src_digit, target_digit, device, noise=None):
+def load_data(m, src_digit, target_digit, device, noise=None, dtype=torch.float32):
     digits = load_digits()
 
     cs = []
@@ -232,7 +240,7 @@ def load_data(m, src_digit, target_digit, device, noise=None):
         digit = digits.target[i]
         is_prior = r_prior is None and digit == src_digit
         if is_prior or digit == target_digit:
-            img = torch.from_numpy(digits.data[i].astype('float32'))
+            img = torch.from_numpy(digits.data[i]).type(dtype)
             if is_prior and noise is not None:
                 img += noise * torch.rand(*img.shape)
             img /= img.sum()
