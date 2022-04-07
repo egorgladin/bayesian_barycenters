@@ -33,7 +33,7 @@ def show_barycenter(r, fname):
     plt.close()
 
 
-def show_barycenters(barycenters, img_sz, img_name, iterations=None, use_softmax=True, scaling=None):
+def show_barycenters(barycenters, img_sz, img_name, iterations=None, use_softmax=True, scaling=None, use_default_folder=True):
     """Display several barycenters across iterations."""
     n_bary = len(barycenters)
     nrows, ncols = ceil(n_bary / 10), min(n_bary, 10)
@@ -60,7 +60,9 @@ def show_barycenters(barycenters, img_sz, img_name, iterations=None, use_softmax
             title = f"Iteration {it}" if isinstance(it, int) else it
             ax.title.set_text(title)
 
-    plt.savefig(f"plots/bary_{img_name}.png", bbox_inches='tight')
+    if use_default_folder:
+        img_name = f"plots/bary_{img_name}"
+    plt.savefig(img_name + ".png", bbox_inches='tight')
     plt.close()
 
 
