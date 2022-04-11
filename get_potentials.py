@@ -71,7 +71,7 @@ def algorithm(mean, cov, samplesize, n_steps, Data, cost,  device ,constant):
     Cov=cov
     # RealBarycenter=ot.barycenter(replace_zeros(Data.clone()).T.contiguous(), cost, 0.005, numItermax=20000)
     Dataext=torch.broadcast_to(Data,(samplesize,len(Data),len(Data[0])))
-    for k in range(1,n_steps):    
+    for k in range(1,n_steps):
         Sample=SampleGeneration(samplesize,Mean,Cov,device)
         ShapedSample=Sample.reshape(samplesize,len(Data),len(Data[0]))
         PotDual=Transformation(cost,ShapedSample, device)
@@ -84,8 +84,8 @@ def algorithm(mean, cov, samplesize, n_steps, Data, cost,  device ,constant):
         ShapedMean=Mean.reshape(len(Data),len(Data[0]))
         MeanDual=Transformation(cost,ShapedMean, device)
         # Barycenter=torch.softmax(-constant*((torch.sum(MeanDual,dim=0))),dim=0)
-        # if k%300==1:
-        #     print(Barycenter)
+        if k % 300 == 1:
+            print(f"Step {k}/{n_steps-1}")
         #     titles = ['Barycenter (Sinkhorn)', 'Barycenter from potentials']
         #     show_barycenters([RealBarycenter, Barycenter], Dim, 'bary_from_poten', use_softmax=False, iterations=titles, use_default_folder=False)
     return MeanDual
