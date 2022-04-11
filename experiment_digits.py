@@ -73,6 +73,7 @@ def experiment(n_steps, sample_size, prior_var, var_decay, noise_level=None, dec
 def get_poten_from_pot(cs, r, cost_mat, reverse_order, device, calc_poten_method='emd', reg=None):
     us = []
     vs = []
+    emds = []
     for c in tqdm(cs):
         if reverse_order:
             mu, nu = c, r
@@ -83,12 +84,14 @@ def get_poten_from_pot(cs, r, cost_mat, reverse_order, device, calc_poten_method
         u, v = res['u'], res['v']
         us.append(u.clone())
         vs.append(v.clone())
+        cur_emd = u @ mu + v @ nu
+        emds.append(cur_emd.item())
         del res
         if device == 'cuda':
             torch.cuda.empty_cache()
 
     potentials = torch.stack(us + vs)  # (2 * n_data_points, n)
-    return potentials
+    return potentials, emds
 
 
 def get_poten_from_vaios(wass_params, cs, r, cost_mat, reverse_order, device, dtype):
@@ -115,10 +118,11 @@ def get_poten_from_vaios(wass_params, cs, r, cost_mat, reverse_order, device, dt
     return potentials, vaios_distances
 
 
-def get_bary_from_poten(potentials, kappa, r):
+def get_bary_from_poten(potentials, kappa, r, get_error=True):
     bary_from_poten = torch.softmax(-potentials.sum(dim=0) / kappa, dim=0)
-    bary_err = torch.norm(bary_from_poten - r) / torch.norm(r)
-    print(f"Relative error of barycenter recovered from potentials: {100 * bary_err:.2f}%")
+    if get_error:
+        bary_err = torch.norm(bary_from_poten - r) / torch.norm(r)
+        print(f"Relative error of barycenter recovered from potentials: {100 * bary_err:.2f}%")
     return bary_from_poten
 
 
@@ -130,10 +134,9 @@ def get_poten_from_alg(cs, cost_mat, device):
     return potentials
 
 
-def baseline(wass_params, kappa, calc_poten_method='sinkhorn', reverse_order=False):
+def baseline(wass_params, kappa, device='cuda', calc_poten_method='sinkhorn', calc_poten=True, reverse_order=False, do_sampling=False):
     assert calc_poten_method in ['emd', 'vaios', 'alg', 'sinkhorn']
     dtype = torch.float64
-    device = 'cuda'
     folder = 'digit_experiment/'
     img_sz = 8
     n_data_points = 5
@@ -144,42 +147,55 @@ def baseline(wass_params, kappa, calc_poten_method='sinkhorn', reverse_order=Fal
     # 1. Take a few images of the same digit
     try:
         cs = torch.load(folder + 'digits.pt', map_location=device)
+        print("Loaded digits from 'digits.pt'")
     except FileNotFoundError:
         _, cs = load_data(n_data_points, src_digit, target_digit, device, dtype=dtype)
         torch.save(cs, folder + 'digits.pt')
+        print("Obtained digits and saved to 'digits.pt'")
 
     # 2. Calculate barycenter of those images
     try:
-        r = torch.load(folder + 'barycenter.pt')
+        r = torch.load(folder + 'barycenter.pt', map_location=device)
+        print("Loaded barycenter from 'barycenter.pt'")
     except FileNotFoundError:
         reg = 0.001
         r = ot.barycenter(replace_zeros(cs.clone()).T.contiguous(), cost_mat, reg, numItermax=20000)  #, verbose=True
         torch.save(r, folder + 'barycenter.pt')
+        print("Obtained barycenter and saved to 'barycenter.pt'")
 
     n = len(r)
 
     # 3. Find the respective potentials
-    calc_poten = False
     if calc_poten:
-        if calc_poten_method == 'emd':
-            potentials = get_poten_from_pot(cs, r, cost_mat, reverse_order, device) # (2 * n_data_points, n)
         if calc_poten_method == 'sinkhorn':
+            print("Calculating potentials with Sinkhorn")
             reg = 0.001
             potentials = get_poten_from_pot(cs, r, cost_mat, reverse_order, device,
                                             calc_poten_method='sinkhorn', reg=reg)  # (2 * n_data_points, n)
-        elif calc_poten_method == 'vaios':
-            potentials, vaios_distances = get_poten_from_vaios(wass_params, cs, r, cost_mat, reverse_order, device, dtype)
-            with open(folder + 'vaios_distances.pickle', 'wb') as handle:
-                pickle.dump(vaios_distances, handle)
-        elif calc_poten_method == 'alg':
-            potentials = get_poten_from_alg(cs, cost_mat, device)  # (n_data_points, n)
+        else:
+            if calc_poten_method == 'emd':
+                print("Calculating potentials with ot.emd")
+                potentials, distances = get_poten_from_pot(cs, r, cost_mat, reverse_order, device)  # (2 * n_data_points, n)
+            elif calc_poten_method == 'vaios':
+                print("Calculating potentials with Vaios' program for Wasserstein distance")
+                potentials, distances = get_poten_from_vaios(wass_params, cs, r, cost_mat, reverse_order, device, dtype)
+            elif calc_poten_method == 'alg':
+                print("Calculating potentials with Vaios' algorithm")
+                potentials = get_poten_from_alg(cs, cost_mat, device)  # (n_data_points, n)
+
+            with open(folder + 'approx_distances.pickle', 'wb') as handle:
+                pickle.dump(distances, handle)
+                print("Saved approximate distances to 'approx_distances.pickle'")
 
         torch.save(potentials, folder + 'potentials.pt')
+        print("Saved potentials to 'potentials.pt'")
     else:
-        potentials = torch.load(folder + 'potentials.pt')
-        if calc_poten_method == 'vaios':
-            with open(folder + 'vaios_distances.pickle', 'rb') as handle:
-                vaios_distances = pickle.load(handle)
+        potentials = torch.load(folder + 'potentials.pt', map_location=device)
+        print("Loaded potentials from 'potentials.pt'")
+        if calc_poten_method in ['vaios', 'emd']:
+            with open(folder + 'approx_distances.pickle', 'rb') as handle:
+                distances = pickle.load(handle)
+                print("Loaded distances from 'approx_distances.pickle'")
 
     # 4. Check the quality of potentials by calculating the respective primal variable
     check_poten = True
@@ -187,15 +203,13 @@ def baseline(wass_params, kappa, calc_poten_method='sinkhorn', reverse_order=Fal
         titles = ['Barycenter (Sinkhorn)', 'Barycenter from potentials']
 
         if calc_poten_method in ['emd', 'sinkhorn']:
-            # bary_from_poten1 = get_bary_from_poten(potentials[:n_data_points], kappa, r)
-            # bary_from_poten2 = get_bary_from_poten(potentials[n_data_points:], kappa, r)
-            bary_from_poten1 = get_bary_from_poten(potentials[:n_data_points], 1., r)
-            bary_from_poten2 = get_bary_from_poten(potentials[n_data_points:], 1., r)
+            bary_from_poten1 = get_bary_from_poten(potentials[:n_data_points], kappa, r)
+            bary_from_poten2 = get_bary_from_poten(potentials[n_data_points:], kappa, r)
             barys_from_poten = [bary_from_poten1, bary_from_poten2]
             titles += ['Barycenter from potentials 2']
 
-        else:
-            if calc_poten_method == 'vaios':
+        if calc_poten_method in ['alg', 'vaios', 'emd']:
+            if calc_poten_method in ['emd', 'vaios']:
                 try:
                     handle = open(folder + 'true_distances.pickle', 'rb')
                     print("Loading true distances")
@@ -207,22 +221,22 @@ def baseline(wass_params, kappa, calc_poten_method='sinkhorn', reverse_order=Fal
                     with open(folder + 'true_distances.pickle', 'wb') as handle:
                         pickle.dump(true_distances, handle)
 
-                dist_errors = [abs(emd_pot - emd_vaios) for emd_pot, emd_vaios in zip(true_distances, vaios_distances)]
+                dist_errors = [abs(emd_pot - emd_vaios) for emd_pot, emd_vaios in zip(true_distances, distances)]
                 dist_rel_err = sum(dist_errors) / sum(true_distances)
                 print(f"Relative error of distance: {100 * dist_rel_err:.2f}%")
 
-            bary_from_poten = get_bary_from_poten(potentials, kappa, r)
-            barys_from_poten = [bary_from_poten]
+            if calc_poten_method in ['alg', 'vaios']:
+                bary_from_poten = get_bary_from_poten(potentials, kappa, r)
+                barys_from_poten = [bary_from_poten]
 
         show_barycenters([r] + barys_from_poten, img_sz, folder + 'bary_from_poten', use_softmax=True, iterations=titles, use_default_folder=False)
 
     # 5. Sample potentials and calculate empirical mean and covariance
-    do_sampling = False
     if do_sampling:
         sample_size = 1000000  # 1 mil
         get_sample = get_sampler(sample_size)
         cov = 0.001 * torch.eye(n_data_points * n, dtype=dtype, device=device)
-        sample = get_sample(potentials, cov, 0)
+        sample = get_sample(potentials.flatten(), cov, 0)
 
         empir_mean = sample.mean(dim=0)
         empir_cov = torch.cov(sample.T)
@@ -232,17 +246,23 @@ def baseline(wass_params, kappa, calc_poten_method='sinkhorn', reverse_order=Fal
 
         torch.save(empir_mean, folder + 'empir_mean.pt')
         torch.save(empir_cov, folder + 'empir_cov.pt')
-    # else:
-    #     empir_mean = torch.load(folder + 'empir_mean.pt')
-    #     empir_cov = torch.load(folder + 'empir_cov.pt')
+    else:
+        empir_mean = torch.load(folder + 'empir_mean.pt', map_location=device)
+        empir_cov = torch.load(folder + 'empir_cov.pt', map_location=device)
 
-    # 5. Sample using empirical mean and covariance
-    # get_sample = get_sampler(8)
-    # sample = get_sample(empir_mean, empir_cov, 1)
-    #
-    # images = [cs[i] for i in range(10)] + [r, empir_mean] + [sample[i] for i in range(8)]  # [::2]
-    # titles = [f'Data point #{i}' for i in range(1, 11)] + ['Barycenter', 'Empirical mean'] + [f'Sample #{i}' for i in range(1, 9)]
-    # show_barycenters(images, img_sz, 'digits4', use_softmax=False, iterations=titles, scaling='partial')
+    # 6. Sample using empirical mean and covariance
+    get_sample = get_sampler(5)
+    sample = get_sample(empir_mean, empir_cov, 1)
+
+    empir_mean_bary = get_bary_from_poten(empir_mean.reshape(n_data_points, n), kappa, r, get_error=False)
+
+    images = [cs[i] for i in range(n_data_points)] + [r, empir_mean_bary]
+    images += [get_bary_from_poten(sample[i].reshape(n_data_points, n), kappa, r, get_error=False) for i in
+               range(sample.shape[0])]  # [::2]
+    titles = [f'Data point #{i}' for i in range(1, n_data_points + 1)] + ['Barycenter', 'Empirical mean'] + [
+        f'Sample #{i}' for i in range(1, sample.shape[0] + 1)]
+    show_barycenters(images, img_sz, folder + 'results', use_softmax=False, iterations=titles, scaling='partial', use_default_folder=False)
+    print("Saved result to 'results.png'")
 
 
 def main():
@@ -255,19 +275,9 @@ def main():
 
 
 if __name__ == "__main__":
-    # main()
-
-    n_steps = 10
-    n_samples = 6000
-    temps = [50.]  # [5. ** i for i in range(5)]
-    pot_vars = [1.]  # [10. ** i for i in range(-1, 2)]
     kappa = 1. / 30.
-    for temp in temps:
-        # print('=' * 10 + f" temp: {temp} " + '=' * 10)
-        for pot_var in pot_vars:
-            # print(' ' * 4 + '-' * 6 + f" pot_var: {pot_var} " + '-' * 6)
-            wass_params = {'n_samples': n_samples,
-                           'n_steps': n_steps,
-                           'temp': temp,
-                           'pot_var': pot_var}
-            baseline(wass_params, kappa, reverse_order=False)
+    calc_poten_method = 'alg'  # potentials were calculated using Vaios' algorithm
+    calc_poten = False  # don't calculate potentials again, just load them from memory
+    do_sampling = False  # don't draw a large number of samples, just load empirical mean and cov from memory
+    baseline(None, kappa, device='cpu', calc_poten_method=calc_poten_method, calc_poten=calc_poten, reverse_order=False,
+             do_sampling=do_sampling)

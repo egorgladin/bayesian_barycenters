@@ -33,32 +33,38 @@ def show_barycenter(r, fname):
     plt.close()
 
 
-def show_barycenters(barycenters, img_sz, img_name, iterations=None, use_softmax=True, scaling=None, use_default_folder=True):
+def show_barycenters(barycenters, img_sz, img_name, iterations=None, use_softmax=True, scaling='full', use_default_folder=True):
     """Display several barycenters across iterations."""
     n_bary = len(barycenters)
-    nrows, ncols = ceil(n_bary / 10), min(n_bary, 10)
+    if n_bary > 10:
+        nrows, ncols = 2, ceil(n_bary / 2)
+    else:
+        nrows, ncols = 1, n_bary
     figsize = (ncols * 3, nrows * 4)
 
     fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)  # , figsize=(16, 4)
     for i, ax in enumerate(axes.flat):
-        if i >= n_bary:
-            break
-        z = barycenters[i]
-        img = (torch.softmax(z, dim=-1) if use_softmax else z).cpu().numpy().reshape(img_sz, -1)
-        # ax = next(axes.flat)  # axes[i] if n_bary > 1 else axes
-        if np.allclose(img, img[0, 0]) or scaling == 'none':
-            ax.imshow(img, cmap='binary', vmin=0, vmax=1)
-        elif scaling == 'partial':
-            ax.imshow(img, cmap='binary', vmin=0)
+        if i < n_bary:
+            z = barycenters[i]
+            img = (torch.softmax(z, dim=-1) if use_softmax else z).cpu().numpy().reshape(img_sz, -1)
+            # ax = next(axes.flat)  # axes[i] if n_bary > 1 else axes
+            if np.allclose(img, img[0, 0]) or scaling == 'none':
+                ax.imshow(img, cmap='binary', vmin=0, vmax=1)
+            elif scaling == 'partial':
+                ax.imshow(img, cmap='binary', vmin=0)
+            else:
+                ax.imshow(img, cmap='binary')
+
+            if iterations is not None:
+                it = iterations[i]
+                title = f"Iteration {it}" if isinstance(it, int) else it
+                ax.title.set_text(title)
         else:
-            ax.imshow(img, cmap='binary')
+            ax.axis('off')
+
         ax.set_xticks([])
         ax.set_yticks([])
 
-        if iterations is not None:
-            it = iterations[i]
-            title = f"Iteration {it}" if isinstance(it, int) else it
-            ax.title.set_text(title)
 
     if use_default_folder:
         img_name = f"plots/bary_{img_name}"
