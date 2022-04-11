@@ -53,11 +53,10 @@ def algorithm(potmean, potcov, potsamplesize, pot_n_steps, first, second, cost, 
         PotPreWeights1 = torch.exp(temperature*PotObjectiveValues1)
         PotWeights1=  PotPreWeights1/torch.sum(PotPreWeights1)    
         PotMean1   = PotWeights1 @ PotSample1
-        PotCov1=0.02*potcov
+        PotCov1=0.002*potcov
         BarObjectiveValues1=objective(first,second,cost,PotMean1.expand(1,len(PotMean1)))
         PotMean1ext=PotMean1.reshape(len(PotMean1),1).expand(len(PotMean1),len(PotMean1)).transpose(1,0)
         PotMean2=(cost-PotMean1ext).amin(dim=1)
-        a1=BarObjectiveValues1
         PotSample2 = torch.zeros(1*potsamplesize,len(potmean),dtype=torch.double).to(device)
         PotObjectiveValues2 = torch.zeros(1*potsamplesize,dtype=torch.double).to(device)
         for g in range(1):
@@ -66,12 +65,12 @@ def algorithm(potmean, potcov, potsamplesize, pot_n_steps, first, second, cost, 
         PotPreWeights2 = torch.exp(temperature*PotObjectiveValues2)
         PotWeights2=  PotPreWeights2/torch.sum(PotPreWeights2)    
         PotMean2   = PotWeights2 @ PotSample2
-        PotCov2=0.02*potcov
+        PotCov2=0.002*potcov
         BarObjectiveValues2=objective(second,first,cost,PotMean2.expand(1,len(PotMean2)))
-        a2=BarObjectiveValues2
         PotMean2ext=PotMean2.reshape(len(PotMean2),1).expand(len(PotMean2),len(PotMean2)).transpose(1,0)
         PotMean1=(cost-PotMean2ext).amin(dim=1)
-        a=torch.max(a1,a2)
+    a=objective(first,second,cost,PotMean1.expand(1,len(PotMean1)))
+    # print(a-ot.emd2(first,second,cost,numItermax=10000))
     return a, PotMean1
 
 
@@ -79,7 +78,7 @@ def algorithm(potmean, potcov, potsamplesize, pot_n_steps, first, second, cost, 
 def distance(mu,nu, cost, device):   
     PotM =  torch.ones(len(mu),dtype=torch.double).to(device)
     PotC  =  torch.eye(len(mu),dtype=torch.double).to(device)
-    return algorithm( PotM, PotC, 2000, 2, mu, nu, cost, Objective, 100, device)
+    return algorithm( PotM, PotC, 10000, 10, mu, nu, cost, Objective, 100, device)
  
 
 
