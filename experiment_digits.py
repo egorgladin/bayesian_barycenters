@@ -242,12 +242,14 @@ def baseline(wass_params, kappa, device='cuda', calc_poten_method='sinkhorn',
     if do_sampling:
         get_sample = get_sampler(sample_size)
         cov = prior_var * torch.eye(n_data_points * n, dtype=dtype, device=device)
-        sample = get_sample(potentials.flatten(), cov, 0)
+        print('Sampling with variance', prior_var)
+        sample = get_sample(potentials.flatten(), cov, 2)
 
         print('Saving the whole sample')
         torch.save(sample, folder + 'whole_sample.pt')
 
     else:
+        print('Loading the sample')
         sample = torch.load(folder + 'whole_sample.pt', map_location=device)
 
     if calc_weights:
@@ -261,9 +263,11 @@ def baseline(wass_params, kappa, device='cuda', calc_poten_method='sinkhorn',
             )
 
         all_objective_vals = torch.cat(objective_list)
+        print('Calculating weights with temp =', temperature)
         all_weights = torch.softmax(temperature * all_objective_vals, dim=-1)
         torch.save(all_weights, folder + 'all_weights.pt')
     else:
+        print('Loading the weights')
         all_weights = torch.load(folder + 'all_weights.pt', map_location=device)
 
     if calc_posterior:
@@ -283,7 +287,7 @@ def baseline(wass_params, kappa, device='cuda', calc_poten_method='sinkhorn',
 
     # 6. Sample using empirical mean and covariance
     get_sample = get_sampler(5)
-    sample = get_sample(empir_mean, empir_cov, 1)
+    sample = get_sample(empir_mean, empir_cov, 3)
 
     empir_mean_bary = get_bary_from_poten(empir_mean.reshape(n_data_points, n), kappa, r, get_error=False)
 
@@ -292,9 +296,9 @@ def baseline(wass_params, kappa, device='cuda', calc_poten_method='sinkhorn',
                range(sample.shape[0])]  # [::2]
     titles = [f'Data point #{i}' for i in range(1, n_data_points + 1)] + ['Barycenter', 'Empirical mean'] + [
         f'Sample #{i}' for i in range(1, sample.shape[0] + 1)]
-    show_barycenters(images, img_sz, folder + 'results', use_softmax=False, iterations=titles, scaling='partial',
+    show_barycenters(images, img_sz, folder + 'results3', use_softmax=False, iterations=titles, scaling='partial',
                      use_default_folder=False)
-    print("Saved result to 'results.png'")
+    print("Saved result to 'results3.png'")
 
 
 def main():
