@@ -1,4 +1,5 @@
 import time
+import os.environ
 
 import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
@@ -8,7 +9,7 @@ from tqdm import tqdm
 from operator import itemgetter
 
 from algorithm import algorithm
-from utils import load_data, safe_log, plot_trajectory, replace_zeros, get_sampler, show_barycenter,\
+from utils import load_data, safe_log, plot_trajectory, replace_zeros, get_sampler, show_barycenter, \
     show_barycenters, get_sampler, norm_sq
 from experiment_barycenter import get_cost_matrix
 
@@ -46,7 +47,7 @@ def experiment(n_steps, sample_size, prior_var, var_decay, noise_level=None, dec
         return -objective_val  # minus because algorithm maximizes objective
 
     z_prior = safe_log(r_prior)
-    prior_cov = prior_var * torch.eye(img_size**2, dtype=dtype, device=device)
+    prior_cov = prior_var * torch.eye(img_size ** 2, dtype=dtype, device=device)
     get_sample = get_sampler(sample_size)
 
     def recalculate_cov(old_cov, sample, step, weights):
@@ -80,7 +81,7 @@ def get_poten_from_pot(cs, r, cost_mat, reverse_order, device, calc_poten_method
             mu, nu = c, r
         else:
             mu, nu = r, c
-        res = ot.emd(mu, nu, cost_mat, log=True)[1] if calc_poten_method == 'emd'\
+        res = ot.emd(mu, nu, cost_mat, log=True)[1] if calc_poten_method == 'emd' \
             else ot.sinkhorn(mu, nu, cost_mat, reg, numItermax=20000, log=True)[1]
         u, v = res['u'], res['v']
         us.append(u.clone())
@@ -129,14 +130,17 @@ def get_bary_from_poten(potentials, kappa, r, get_error=True):
 
 def get_poten_from_alg(cs, cost_mat, device):
     m, n = cs.shape
-    Mean = torch.ones(m*n, dtype=torch.float64, device=device)
-    Covariance = torch.eye(m*n, dtype=torch.float64, device=device)
+    Mean = torch.ones(m * n, dtype=torch.float64, device=device)
+    Covariance = torch.eye(m * n, dtype=torch.float64, device=device)
     potentials = alg_for_poten(Mean, Covariance, 10000, 5000, cs, cost_mat, device, 40)
     return potentials
 
 
-def baseline(wass_params, kappa, device='cuda', calc_poten_method='sinkhorn', calc_poten=True, reverse_order=False, do_sampling=False, temperature=10.):
+def baseline(wass_params, kappa, device='cuda', calc_poten_method='sinkhorn',
+             calc_poten=True, reverse_order=False, do_sampling=False, sample_size=1000000,
+             n_batches=100, temperature=10.):
     assert calc_poten_method in ['emd', 'vaios', 'alg', 'sinkhorn']
+    assert sample_size % n_batches == 0
     dtype = torch.float64
     folder = 'digit_experiment/'
     img_sz = 8
@@ -160,7 +164,7 @@ def baseline(wass_params, kappa, device='cuda', calc_poten_method='sinkhorn', ca
         print("Loaded barycenter from 'barycenter.pt'")
     except FileNotFoundError:
         reg = 0.001
-        r = ot.barycenter(replace_zeros(cs.clone()).T.contiguous(), cost_mat, reg, numItermax=20000)  #, verbose=True
+        r = ot.barycenter(replace_zeros(cs.clone()).T.contiguous(), cost_mat, reg, numItermax=20000)  # , verbose=True
         torch.save(r, folder + 'barycenter.pt')
         print("Obtained barycenter and saved to 'barycenter.pt'")
 
@@ -176,7 +180,8 @@ def baseline(wass_params, kappa, device='cuda', calc_poten_method='sinkhorn', ca
         else:
             if calc_poten_method == 'emd':
                 print("Calculating potentials with ot.emd")
-                potentials, distances = get_poten_from_pot(cs, r, cost_mat, reverse_order, device)  # (2 * n_data_points, n)
+                potentials, distances = get_poten_from_pot(cs, r, cost_mat, reverse_order,
+                                                           device)  # (2 * n_data_points, n)
             elif calc_poten_method == 'vaios':
                 print("Calculating potentials with Vaios' program for Wasserstein distance")
                 potentials, distances = get_poten_from_vaios(wass_params, cs, r, cost_mat, reverse_order, device, dtype)
@@ -230,23 +235,48 @@ def baseline(wass_params, kappa, device='cuda', calc_poten_method='sinkhorn', ca
                 bary_from_poten = get_bary_from_poten(potentials, kappa, r)
                 barys_from_poten = [bary_from_poten]
 
-        show_barycenters([r] + barys_from_poten, img_sz, folder + 'bary_from_poten', use_softmax=True, iterations=titles, use_default_folder=False)
+        show_barycenters([r] + barys_from_poten, img_sz, folder + 'bary_from_poten', use_softmax=True,
+                         iterations=titles, use_default_folder=False)
 
     # 5. Sample potentials and calculate empirical mean and covariance
     if do_sampling:
-        sample_size = 1000000  # 1 mil
         get_sample = get_sampler(sample_size)
         cov = 0.001 * torch.eye(n_data_points * n, dtype=dtype, device=device)
         sample = get_sample(potentials.flatten(), cov, 0)
 
-        objective_values = objective_function(sample, cost_mat, cs, kappa, double_conjugate=False)
-        weights = torch.softmax(temperature * objective_values, dim=-1)
-        del objective_values
+        increment = sample_size // n_batches
+        print('Started saving batches')
+        for i in tqdm(range(n_batches)):
+            torch.save(sample[i * increment:(i + 1) * increment], folder + f'sample_batch{i}.pt')
 
-        empir_mean = weights @ sample
-        empir_cov = torch.cov(sample.T, aweights=weights)
+        print('Saving the whole sample')
+        torch.save(sample, folder + 'whole_sample.pt')
         del sample
-        del weights
+        if device == 'cuda':
+            torch.cuda.empty_cache()
+
+        weight_list = []
+        print('Started calculating objective for batches')
+        for i in tqdm(range(n_batches)):
+            sample_batch = torch.load(folder + f'sample_batch{i}.pt', map_location=device)
+            objective_values = objective_function(sample_batch, cost_mat, cs, kappa, double_conjugate=False)
+            del sample_batch
+            weights = torch.softmax(temperature * objective_values, dim=-1)
+            del objective_values
+            weight_list.append(weights.clone())
+            del weights
+            if device == 'cuda':
+                torch.cuda.empty_cache()
+
+        all_weights = torch.cat(weight_list)
+        torch.save(all_weights, folder + 'all_weights.pt')
+
+        sample = torch.load(folder + 'whole_sample.pt', map_location=device)
+        empir_mean = all_weights @ sample
+        empir_cov = torch.cov(sample.T, aweights=weights)
+
+        del sample
+        del all_weights
         if device == 'cuda':
             torch.cuda.empty_cache()
 
@@ -267,7 +297,8 @@ def baseline(wass_params, kappa, device='cuda', calc_poten_method='sinkhorn', ca
                range(sample.shape[0])]  # [::2]
     titles = [f'Data point #{i}' for i in range(1, n_data_points + 1)] + ['Barycenter', 'Empirical mean'] + [
         f'Sample #{i}' for i in range(1, sample.shape[0] + 1)]
-    show_barycenters(images, img_sz, folder + 'results', use_softmax=False, iterations=titles, scaling='partial', use_default_folder=False)
+    show_barycenters(images, img_sz, folder + 'results', use_softmax=False, iterations=titles, scaling='partial',
+                     use_default_folder=False)
     print("Saved result to 'results.png'")
 
 
@@ -281,9 +312,10 @@ def main():
 
 
 if __name__ == "__main__":
+    os.environ['TCMALLOC_LARGE_ALLOC_REPORT_THRESHOLD'] = 2570000000
     kappa = 1. / 30.
     calc_poten_method = 'alg'  # potentials were calculated using Vaios' algorithm
     calc_poten = False  # don't calculate potentials again, just load them from memory
     do_sampling = True  # don't draw a large number of samples, just load empirical mean and cov from memory
     baseline(None, kappa, device='cpu', calc_poten_method=calc_poten_method, calc_poten=calc_poten, reverse_order=False,
-             do_sampling=do_sampling)
+             do_sampling=do_sampling, sample_size=100000)
