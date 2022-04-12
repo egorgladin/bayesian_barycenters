@@ -1,5 +1,5 @@
 import time
-import os.environ
+from os import environ
 
 import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
@@ -312,7 +312,7 @@ def main():
 
 
 if __name__ == "__main__":
-    os.environ['TCMALLOC_LARGE_ALLOC_REPORT_THRESHOLD'] = 2570000000
+    environ['TCMALLOC_LARGE_ALLOC_REPORT_THRESHOLD'] = '2570000000'
     kappa = 1. / 30.
     calc_poten_method = 'alg'  # potentials were calculated using Vaios' algorithm
     calc_poten = False  # don't calculate potentials again, just load them from memory
