@@ -15,6 +15,7 @@ from experiment_barycenter import get_cost_matrix
 from Wass import algorithm as vaios_alg
 from Wass import Objective
 from get_potentials import algorithm as alg_for_poten
+from kantorovich_dual import objective_function
 
 
 def experiment(n_steps, sample_size, prior_var, var_decay, noise_level=None, decay='exp', empir_cov=False,
@@ -134,7 +135,7 @@ def get_poten_from_alg(cs, cost_mat, device):
     return potentials
 
 
-def baseline(wass_params, kappa, device='cuda', calc_poten_method='sinkhorn', calc_poten=True, reverse_order=False, do_sampling=False):
+def baseline(wass_params, kappa, device='cuda', calc_poten_method='sinkhorn', calc_poten=True, reverse_order=False, do_sampling=False, temperature=10.):
     assert calc_poten_method in ['emd', 'vaios', 'alg', 'sinkhorn']
     dtype = torch.float64
     folder = 'digit_experiment/'
@@ -238,9 +239,14 @@ def baseline(wass_params, kappa, device='cuda', calc_poten_method='sinkhorn', ca
         cov = 0.001 * torch.eye(n_data_points * n, dtype=dtype, device=device)
         sample = get_sample(potentials.flatten(), cov, 0)
 
-        empir_mean = sample.mean(dim=0)
-        empir_cov = torch.cov(sample.T)
+        objective_values = objective_function(sample, cost_mat, cs, kappa, double_conjugate=False)
+        weights = torch.softmax(temperature * objective_values, dim=-1)
+        del objective_values
+
+        empir_mean = weights @ sample
+        empir_cov = torch.cov(sample.T, aweights=weights)
         del sample
+        del weights
         if device == 'cuda':
             torch.cuda.empty_cache()
 
@@ -278,6 +284,6 @@ if __name__ == "__main__":
     kappa = 1. / 30.
     calc_poten_method = 'alg'  # potentials were calculated using Vaios' algorithm
     calc_poten = False  # don't calculate potentials again, just load them from memory
-    do_sampling = False  # don't draw a large number of samples, just load empirical mean and cov from memory
+    do_sampling = True  # don't draw a large number of samples, just load empirical mean and cov from memory
     baseline(None, kappa, device='cpu', calc_poten_method=calc_poten_method, calc_poten=calc_poten, reverse_order=False,
              do_sampling=do_sampling)
