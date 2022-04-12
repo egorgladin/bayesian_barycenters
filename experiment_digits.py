@@ -321,4 +321,4 @@ if __name__ == "__main__":
     calc_poten = False  # don't calculate potentials again, just load them from memory
     do_sampling = True  # don't draw a large number of samples, just load empirical mean and cov from memory
     baseline(None, kappa, device='cpu', calc_poten_method=calc_poten_method, calc_poten=calc_poten, reverse_order=False,
-             do_sampling=do_sampling, sample_size=1000000, prior_var=1e-4, temperature=20.)
+             do_sampling=do_sampling, sample_size=100000, n_batches=10, prior_var=1e-4, temperature=20.)
