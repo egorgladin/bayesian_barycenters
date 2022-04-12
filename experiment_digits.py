@@ -138,7 +138,7 @@ def get_poten_from_alg(cs, cost_mat, device):
 
 def baseline(wass_params, kappa, device='cuda', calc_poten_method='sinkhorn',
              calc_poten=True, reverse_order=False, do_sampling=False, sample_size=1000000,
-             n_batches=100, temperature=10.):
+             n_batches=100, calc_weights=True, temperature=10., calc_posterior=True):
     assert calc_poten_method in ['emd', 'vaios', 'alg', 'sinkhorn']
     assert sample_size % n_batches == 0
     dtype = torch.float64
@@ -255,11 +255,12 @@ def baseline(wass_params, kappa, device='cuda', calc_poten_method='sinkhorn',
         if device == 'cuda':
             torch.cuda.empty_cache()
 
+    if calc_weights:
         weight_list = []
         print('Started calculating objective for batches')
         for i in tqdm(range(n_batches)):
             sample_batch = torch.load(folder + f'sample_batch{i}.pt', map_location=device)
-            objective_values = objective_function(sample_batch, cost_mat, cs, kappa, double_conjugate=False)
+            objective_values = objective_function(sample_batch, cost_mat, cs, kappa, double_conjugate=False)[0]
             del sample_batch
             weights = torch.softmax(temperature * objective_values, dim=-1)
             del objective_values
@@ -270,10 +271,13 @@ def baseline(wass_params, kappa, device='cuda', calc_poten_method='sinkhorn',
 
         all_weights = torch.cat(weight_list)
         torch.save(all_weights, folder + 'all_weights.pt')
+    else:
+        all_weights = torch.load(folder + 'all_weights.pt', map_location=device)
 
+    if calc_posterior:
         sample = torch.load(folder + 'whole_sample.pt', map_location=device)
         empir_mean = all_weights @ sample
-        empir_cov = torch.cov(sample.T, aweights=weights)
+        empir_cov = torch.cov(sample.T, aweights=all_weights)
 
         del sample
         del all_weights
@@ -318,4 +322,4 @@ if __name__ == "__main__":
     calc_poten = False  # don't calculate potentials again, just load them from memory
     do_sampling = True  # don't draw a large number of samples, just load empirical mean and cov from memory
     baseline(None, kappa, device='cpu', calc_poten_method=calc_poten_method, calc_poten=calc_poten, reverse_order=False,
-             do_sampling=do_sampling, sample_size=100000)
+             do_sampling=do_sampling, sample_size=1000000)
