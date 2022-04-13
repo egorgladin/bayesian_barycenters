@@ -272,7 +272,7 @@ def load_mnist(m, src_digit, target_digit, device, size=(14, 14), dtype=torch.fl
         Resize(size),
         ToTensor()
     ])
-    mnist = MNIST('mnist', train=False, transform=transform, download=True)
+    mnist = MNIST('.', train=False, transform=transform, download=True)
 
     cs = []
     r_prior = None
@@ -296,7 +296,7 @@ def replace_zeros(arr, replace_val=1e-9, sumdim=-1):
 
 
 def test_mnist():
-    r, cs = load_mnist(5, 1, 2, 'cpu')
+    r, cs = load_mnist(5, 1, 2, 'cpu', size=(14, 14))
     images = [c for c in cs] + [r]
     img_sz = 14
     image_name = 'mnist_test'
