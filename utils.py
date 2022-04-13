@@ -13,6 +13,8 @@ from matplotlib.ticker import LinearLocator, FormatStrFormatter, FuncFormatter, 
 import pickle
 from sklearn.datasets import load_digits
 from torch.distributions.multivariate_normal import MultivariateNormal
+from torchvision.datasets import MNIST
+from torchvision.transforms import Resize, ToTensor, Compose
 
 
 def safe_log(arr, minus_inf=-100.):
@@ -265,15 +267,46 @@ def load_data(m, src_digit, target_digit, device, noise=None, dtype=torch.float3
     return r_prior.to(device), torch.stack(cs).to(device)
 
 
+def load_mnist(m, src_digit, target_digit, device, size=(14, 14), dtype=torch.float32):
+    transform = Compose([
+        Resize(size),
+        ToTensor()
+    ])
+    mnist = MNIST('mnist', train=False, transform=transform, download=True)
+
+    cs = []
+    r_prior = None
+    i = 0
+    while len(cs) < m:
+        img, digit = mnist[i]
+        is_prior = r_prior is None and digit == src_digit
+        if is_prior:
+            r_prior = img.flatten()
+        elif digit == target_digit:
+            cs.append(img)
+        i += 1
+    cs = torch.stack(cs).reshape(m, -1).type(dtype)
+    return r_prior.to(device), (cs / cs.sum()).to(device)
+
+
 def replace_zeros(arr, replace_val=1e-9, sumdim=-1):
     arr[arr == 0] = replace_val
     arr /= arr.sum(dim=sumdim, keepdim=True)
     return arr
 
 
+def test_mnist():
+    r, cs = load_mnist(5, 1, 2, 'cpu')
+    images = [c for c in cs] + [r]
+    img_sz = 14
+    image_name = 'mnist_test'
+    show_barycenters(images, img_sz, image_name, use_softmax=False, scaling='partial')
+
+
 if __name__ == '__main__':
-    file_names = [f'trajectory_5_samples_512_var_16.0_decay_0.8']\
-               + [f'trajectory_5_samples_{8 ** i}_var_4.0_decay_1.0' for i in range(4, 6)]
-    plot_names = [f'{8 ** i} samples' for i in range(3, 6)]
-    info_names = [{'Objective': 1}, {'Squared error': 2}]
-    compare_trajectories(file_names, plot_names, info_names, 6, 5)
+    # file_names = [f'trajectory_5_samples_512_var_16.0_decay_0.8']\
+    #            + [f'trajectory_5_samples_{8 ** i}_var_4.0_decay_1.0' for i in range(4, 6)]
+    # plot_names = [f'{8 ** i} samples' for i in range(3, 6)]
+    # info_names = [{'Objective': 1}, {'Squared error': 2}]
+    # compare_trajectories(file_names, plot_names, info_names, 6, 5)
+    test_mnist()
