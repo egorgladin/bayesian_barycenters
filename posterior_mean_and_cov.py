@@ -1,4 +1,5 @@
 import torch
+from math import ceil
 
 from kantorovich_dual import objective_function
 from experiment_barycenter import get_cost_matrix, get_data_and_solution
@@ -30,19 +31,12 @@ def get_posterior_mean(sample_generator, objective, temperature):
     return result
 
 
-def check_mean():
-    img_size = 3
-    device = 'cpu'
+def check_mean(sample_size, n_batches, cost_mat, cs, dtype, device='cpu'):
     kappa = 1. / 30
     temp = 30.
 
-    sample_size = 1000
-    n = img_size ** 2  # dimensionality of barycenter
-    dtype = torch.float64
-
-    cost_mat = get_cost_matrix(img_size, device, dtype=dtype)
-    cs, r_opt = get_data_and_solution(device, dtype=dtype, size=img_size, column_interval=(1 if img_size == 3 else 2))
     m = cs.shape[0]
+    n = cost_mat.shape[0]
 
     objective = lambda sample: objective_function(sample, cost_mat, cs, kappa, double_conjugate=False)[0]
 
@@ -58,14 +52,76 @@ def check_mean():
                                     recalculate_cov, seed=0, temperature=temp)[-1]
 
     def sample_generator():
+        increment = ceil(sample_size / n_batches)
         sample = get_sample(z_prior, prior_cov, 0)
-        yield sample[:sample_size//2]
-        yield sample[sample_size//2:]
+        for i in range(n_batches):
+            yield sample[i*increment:(i+1)*increment]
 
     batch_posterior_mean = get_posterior_mean(sample_generator, objective, temp)
     error = torch.norm(true_posterior_mean - batch_posterior_mean) / torch.norm(true_posterior_mean)
     print(f"Relative error: {100 * error:.2e}%")
 
 
+def test_toy_data(sample_size, n_batches, device='cpu'):
+    dtype = torch.float64
+    img_size = 3
+    cost_mat = get_cost_matrix(img_size, device, dtype=dtype)
+    cs, r_opt = get_data_and_solution(device, dtype=dtype, size=img_size, column_interval=(1 if img_size == 3 else 2))
+    print(f"sample_size {sample_size}, n_batches {n_batches}, device {device}")
+    check_mean(sample_size, n_batches, cost_mat, cs, dtype, device=device)
+
+
+def large_sample_test(sample_size, n_batches, cost_mat, cs, dtype, device='cpu'):
+    kappa = 1. / 30
+    temp = 30.
+
+    m = cs.shape[0]
+    n = cost_mat.shape[0]
+
+    objective = lambda sample: objective_function(sample, cost_mat, cs, kappa, double_conjugate=False)[0]
+
+    z_prior = -torch.ones(m * n, device=device, dtype=dtype)
+    prior_cov = torch.eye(m * n, dtype=dtype, device=device)
+
+    increment = ceil(sample_size / n_batches)
+    get_sample = get_sampler(increment)
+
+    def sample_generator():
+        for i in range(n_batches):
+            yield get_sample(z_prior, prior_cov, i)
+
+    _ = get_posterior_mean(sample_generator, objective, temp)
+    print("Calculated the mean")
+
+
+def test_digits(sample_size, n_batches, device='cpu', large_sample=False):
+    dtype = torch.float64
+    img_size = 8
+    cost_mat = get_cost_matrix(img_size, device, dtype=dtype)
+    folder = 'digit_experiment/'
+    cs = torch.load(folder + 'digits.pt', map_location=device)
+    print(f"sample_size {sample_size}, n_batches {n_batches}, device {device}")
+    if large_sample:
+        large_sample_test(sample_size, n_batches, cost_mat, cs, dtype, device=device)
+    else:
+        check_mean(sample_size, n_batches, cost_mat, cs, dtype, device=device)
+
+
+def main():
+    # Check accuracy for moderate sample sizes
+    for sample_size in [100, 1000, 10000]:
+        for n_batches in [2, 10, 100]:
+            if sample_size == n_batches:
+                n_batches = 50
+            for device in ['cpu', 'cuda']:
+                # test_toy_data(sample_size, n_batches, device=device)
+                test_digits(sample_size, n_batches, device=device)
+
+    # Check efficient memory usage for huge sample size
+    sample_size = int(1e7)
+    n_batches = 1000
+    test_digits(sample_size, n_batches, device='cuda', large_sample=True)
+
+
 if __name__ == '__main__':
-    check_mean()
+    main()
