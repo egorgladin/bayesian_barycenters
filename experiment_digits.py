@@ -10,7 +10,7 @@ from operator import itemgetter
 
 from algorithm import algorithm
 from utils import load_data, safe_log, plot_trajectory, replace_zeros, get_sampler, show_barycenter, \
-    show_barycenters, get_sampler, norm_sq
+    show_barycenters, get_sampler, norm_sq, get_digits_and_bary
 from experiment_barycenter import get_cost_matrix
 
 from Wass import algorithm as vaios_alg
@@ -149,24 +149,9 @@ def baseline(wass_params, kappa, device='cuda', calc_poten_method='sinkhorn',
     target_digit = 0
     cost_mat = get_cost_matrix(img_sz, device, dtype=dtype)
 
-    # 1. Take a few images of the same digit
-    try:
-        cs = torch.load(folder + 'digits.pt', map_location=device)
-        print("Loaded digits from 'digits.pt'")
-    except FileNotFoundError:
-        _, cs = load_data(n_data_points, src_digit, target_digit, device, dtype=dtype)
-        torch.save(cs, folder + 'digits.pt')
-        print("Obtained digits and saved to 'digits.pt'")
-
-    # 2. Calculate barycenter of those images
-    try:
-        r = torch.load(folder + 'barycenter.pt', map_location=device)
-        print("Loaded barycenter from 'barycenter.pt'")
-    except FileNotFoundError:
-        reg = 0.001
-        r = ot.barycenter(replace_zeros(cs.clone()).T.contiguous(), cost_mat, reg, numItermax=20000)  # , verbose=True
-        torch.save(r, folder + 'barycenter.pt')
-        print("Obtained barycenter and saved to 'barycenter.pt'")
+    # 1. Get a few images of the same digit and their barycenter
+    cs, r = get_digits_and_bary(folder + 'digits.pt', folder + 'barycenter.pt', target_digit=target_digit,
+                                n_data_points=n_data_points, dtype=dtype, device=device, cost_mat=cost_mat, verbose=True)
 
     n = len(r)
 

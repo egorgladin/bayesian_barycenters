@@ -29,7 +29,8 @@ def get_c_concave(phi, cost_mat, double=True):
     return phi_c, phi.reshape(M, m, n)
 
 
-def objective_function(sample, cost_mat, cs, kappa, return_what=None, double_conjugate=True, inverse_order=False):
+def objective_function(sample, cost_mat, cs, kappa, return_what=None,
+                       double_conjugate=True, inverse_order=False, kappa2=None):
     # 'sample' has size (M, m*n), where M is sample size or 1
     if return_what is None:
         return_what = ['objective']
@@ -48,7 +49,7 @@ def objective_function(sample, cost_mat, cs, kappa, return_what=None, double_con
         result += [obj_val]
 
     if 'barycenter' in return_what:
-        bary = torch.softmax(-phi_bar / kappa, dim=-1)
+        bary = torch.softmax(-phi_bar / kappa, dim=-1) if kappa2 is None else torch.softmax(-phi_bar / kappa2, dim=-1)
         result += [bary]
 
     return result

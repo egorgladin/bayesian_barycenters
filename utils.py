@@ -4,6 +4,7 @@ Auxiliary functions.
 import torch
 import numpy as np
 from math import ceil
+from ot import barycenter as ot_barycenter
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -72,6 +73,39 @@ def show_barycenters(barycenters, img_sz, img_name, iterations=None, use_softmax
         img_name = f"plots/bary_{img_name}"
     plt.savefig(img_name + ".png", bbox_inches='tight')
     plt.close()
+
+
+def get_digits_and_bary(data_path, bary_path, target_digit=None, n_data_points=None,
+                        dtype=torch.float32, device='cpu', cost_mat=None, verbose=False):
+    try:
+        cs = torch.load(data_path, map_location=device)
+        if verbose:
+            print(f"Loaded digits from {data_path}")
+    except FileNotFoundError:
+        not_specified = ['target_digit'] if target_digit is None else []
+        not_specified += ['n_data_points'] if n_data_points is None else []
+        if not_specified:
+            raise ValueError(' and '.join(not_specified) + f"should be specified when file {data_path} doesn't exist")
+
+        _, cs = load_data(n_data_points, 5, target_digit, device, dtype=dtype)
+        torch.save(cs, data_path)
+        if verbose:
+            print(f"Obtained digits and saved to {data_path}")
+
+    try:
+        r = torch.load(bary_path, map_location=device)
+        if verbose:
+            print(f"Loaded barycenter from {bary_path}")
+    except FileNotFoundError:
+        if cost_mat is None:
+            raise ValueError(f"Cost matrix should be given when file {bary_path} doesn't exist")
+        reg = 0.001
+        r = ot_barycenter(replace_zeros(cs.clone()).T.contiguous(), cost_mat, reg, numItermax=20000)
+        torch.save(r, bary_path)
+        if verbose:
+            print(f"Obtained barycenter and saved to {bary_path}")
+
+    return cs, r
 
 
 def plot_convergence(trajectory, img_name, info_names, log_scale=False, opt_val=None):
