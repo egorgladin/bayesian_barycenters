@@ -1,8 +1,7 @@
 import ot
 import torch
 
-from experiment_barycenter import get_cost_matrix, get_data_and_solution
-from utils import replace_zeros, show_barycenters
+from utils import get_cost_mat, show_barycenters
 from kantorovich_dual import get_c_concave
 
 from tqdm.contrib.itertools import product
@@ -58,7 +57,7 @@ def digits_problem():
     folder = 'digit_experiment/'
     img_sz = 8
     device = 'cpu'
-    cost_mat = get_cost_matrix(img_sz, device, dtype=dtype)
+    cost_mat = get_cost_mat(img_sz, device, dtype=dtype)
     cs = torch.load(folder + 'digits.pt', map_location=device)
     r = torch.load(folder + 'barycenter.pt', map_location=device)
 

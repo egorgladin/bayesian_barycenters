@@ -9,9 +9,8 @@ from tqdm import tqdm
 from operator import itemgetter
 
 from algorithm import algorithm
-from utils import load_data, safe_log, plot_trajectory, replace_zeros, get_sampler, show_barycenter, \
+from utils import get_cost_mat, load_data, safe_log, plot_trajectory, replace_zeros, get_sampler, show_barycenter, \
     show_barycenters, get_sampler, norm_sq, get_digits_and_bary
-from experiment_barycenter import get_cost_matrix
 
 from Wass import algorithm as vaios_alg
 from Wass import Objective
@@ -33,7 +32,7 @@ def experiment(n_steps, sample_size, prior_var, var_decay, noise_level=None, dec
     cs = replace_zeros(cs)
 
     img_size = 8
-    cost_mat = get_cost_matrix(img_size, device, dtype=dtype)
+    cost_mat = get_cost_mat(img_size, device, dtype=dtype)
 
     def objective(sample):
         # sample has shape (sample_size, n)
@@ -147,7 +146,7 @@ def baseline(wass_params, kappa, device='cuda', calc_poten_method='sinkhorn',
     n_data_points = 5
     src_digit = 0
     target_digit = 0
-    cost_mat = get_cost_matrix(img_sz, device, dtype=dtype)
+    cost_mat = get_cost_mat(img_sz, device, dtype=dtype)
 
     # 1. Get a few images of the same digit and their barycenter
     cs, r = get_digits_and_bary(folder + 'digits.pt', folder + 'barycenter.pt', target_digit=target_digit,

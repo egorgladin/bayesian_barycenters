@@ -5,6 +5,8 @@ import torch
 import numpy as np
 from math import ceil
 from ot import barycenter as ot_barycenter
+import collections
+import itertools
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -16,6 +18,18 @@ from sklearn.datasets import load_digits
 from torch.distributions.multivariate_normal import MultivariateNormal
 from torchvision.datasets import MNIST
 from torchvision.transforms import Resize, ToTensor, Compose
+
+
+def get_cost_mat(im_sz, device, dtype=torch.float32):
+    partition = torch.linspace(0, 1, im_sz)
+    couples = np.array(np.meshgrid(partition, partition)).T.reshape(-1, 2)
+    x = np.array(list(itertools.product(couples, repeat=2)))
+    x = torch.tensor(x, dtype=dtype, device=device)  # torch.from_numpy(x).to(device)
+    a = x[:, 0]
+    b = x[:, 1]
+    C = torch.linalg.norm(a - b, axis=1) ** 2
+    # C = C.to(device)
+    return C.reshape((im_sz**2, -1))
 
 
 def safe_log(arr, minus_inf=-100.):
@@ -76,7 +90,7 @@ def show_barycenters(barycenters, img_sz, img_name, iterations=None, use_softmax
 
 
 def get_digits_and_bary(data_path, bary_path, target_digit=None, n_data_points=None,
-                        dtype=torch.float32, device='cpu', cost_mat=None, verbose=False):
+                        dtype=torch.float32, device='cpu', cost_mat=None, verbose=False, mnist=False):
     try:
         cs = torch.load(data_path, map_location=device)
         if verbose:
@@ -87,7 +101,8 @@ def get_digits_and_bary(data_path, bary_path, target_digit=None, n_data_points=N
         if not_specified:
             raise ValueError(' and '.join(not_specified) + f"should be specified when file {data_path} doesn't exist")
 
-        _, cs = load_data(n_data_points, 5, target_digit, device, dtype=dtype)
+        _, cs = load_mnist(n_data_points, 5, target_digit, device, size=(28, 28), dtype=dtype)\
+            if mnist else load_data(n_data_points, 5, target_digit, device, dtype=dtype)
         torch.save(cs, data_path)
         if verbose:
             print(f"Obtained digits and saved to {data_path}")
@@ -100,7 +115,8 @@ def get_digits_and_bary(data_path, bary_path, target_digit=None, n_data_points=N
         if cost_mat is None:
             raise ValueError(f"Cost matrix should be given when file {bary_path} doesn't exist")
         reg = 0.001
-        r = ot_barycenter(replace_zeros(cs.clone()).T.contiguous(), cost_mat, reg, numItermax=20000)
+        r = ot_barycenter(replace_zeros(cs.clone()).T.contiguous(), cost_mat, reg,
+                          numItermax=20000, stopThr=1e-5, verbose=verbose)
         torch.save(r, bary_path)
         if verbose:
             print(f"Obtained barycenter and saved to {bary_path}")
@@ -125,7 +141,7 @@ def plot_convergence(trajectory, img_name, info_names, log_scale=False, opt_val=
         ax.yaxis.grid()
 
         ax.legend()
-        if log_scale:
+        if (isinstance(log_scale, collections.Sequence) and log_scale[i]) or (log_scale is True):
             ax.set_yscale('log')
 
     plt.tight_layout()

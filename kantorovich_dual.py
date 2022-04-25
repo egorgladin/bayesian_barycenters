@@ -10,8 +10,8 @@ import ot
 from scipy.optimize import minimize
 
 from algorithm import algorithm
-from experiment_barycenter import get_cost_matrix, get_data_and_solution
-from utils import plot_trajectory, norm_sq, get_sampler, show_barycenters, get_empir_cov, scale_cov, replace_zeros
+from experiment_barycenter import get_data_and_solution
+from utils import get_cost_mat, plot_trajectory, norm_sq, get_sampler, show_barycenters, get_empir_cov, scale_cov, replace_zeros
 
 from Wass import algorithm as vaios_alg
 from Wass import Objective
@@ -49,7 +49,7 @@ def objective_function(sample, cost_mat, cs, kappa, return_what=None,
         result += [obj_val]
 
     if 'barycenter' in return_what:
-        bary = torch.softmax(-phi_bar / kappa, dim=-1) if kappa2 is None else torch.softmax(-phi_bar / kappa2, dim=-1)
+        bary = torch.softmax(-phi_bar / (kappa if kappa2 is None else kappa2), dim=-1)
         result += [bary]
 
     return result
@@ -61,7 +61,7 @@ def run_experiment(img_size, device, prior_var, var_decay, n_steps, sample_size,
     n = img_size ** 2  # dimensionality of barycenter
     dtype = torch.float64
 
-    cost_mat = get_cost_matrix(img_size, device, dtype=dtype)
+    cost_mat = get_cost_mat(img_size, device, dtype=dtype)
     cs, r_opt = get_data_and_solution(device, dtype=dtype, size=img_size, column_interval=(1 if img_size == 3 else 2))
     m = cs.shape[0]
 
@@ -154,7 +154,7 @@ def grid_search():
 
 def test_c_concave():
     img_sz = 3
-    cost_mat = get_cost_matrix(img_sz, 'cpu')
+    cost_mat = get_cost_mat(img_sz, 'cpu')
     n = img_sz ** 2
 
     def vaios_c_concave(cost, potsample):
@@ -187,7 +187,7 @@ def bary_potentials():
     device = 'cpu'
     img_sz = 5
     dtype = torch.float64
-    cost_mat = get_cost_matrix(img_sz, device, dtype=dtype)
+    cost_mat = get_cost_mat(img_sz, device, dtype=dtype)
     n = img_sz ** 2
     cs, r_opt = get_data_and_solution(device, size=img_sz, dtype=dtype, column_interval=(1 if img_sz == 3 else 2))
 
@@ -220,7 +220,7 @@ def external_maximizer():
     device = 'cpu'
     img_sz = 5
     dtype = torch.float64
-    cost_mat = get_cost_matrix(img_sz, device, dtype=dtype)
+    cost_mat = get_cost_mat(img_sz, device, dtype=dtype)
     n = img_sz ** 2
     cs, r_opt = get_data_and_solution(device, dtype=dtype, size=img_sz, column_interval=(1 if img_sz == 3 else 2))
     m = cs.shape[0]

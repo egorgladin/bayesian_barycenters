@@ -2,8 +2,8 @@ import torch
 from math import ceil
 
 from kantorovich_dual import objective_function
-from experiment_barycenter import get_cost_matrix, get_data_and_solution
-from utils import get_sampler
+from experiment_barycenter import get_data_and_solution
+from utils import get_cost_mat, get_sampler
 from algorithm import algorithm
 
 
@@ -97,7 +97,7 @@ def check_mean(sample_size, n_batches, cost_mat, cs, dtype, device='cpu'):
 def test_toy_data(sample_size, n_batches, device='cpu'):
     dtype = torch.float64
     img_size = 3
-    cost_mat = get_cost_matrix(img_size, device, dtype=dtype)
+    cost_mat = get_cost_mat(img_size, device, dtype=dtype)
     cs, r_opt = get_data_and_solution(device, dtype=dtype, size=img_size, column_interval=(1 if img_size == 3 else 2))
     print(f"sample_size {sample_size}, n_batches {n_batches}, device {device}")
     check_mean(sample_size, n_batches, cost_mat, cs, dtype, device=device)
@@ -132,7 +132,7 @@ def large_sample_test(sample_size, n_batches, cost_mat, cs, dtype, device='cpu',
 def test_digits(sample_size, n_batches, device='cpu', large_sample=False, test_cov=False):
     dtype = torch.float64
     img_size = 8
-    cost_mat = get_cost_matrix(img_size, device, dtype=dtype)
+    cost_mat = get_cost_mat(img_size, device, dtype=dtype)
     folder = 'digit_experiment/'
     cs = torch.load(folder + 'digits.pt', map_location=device)
     print(f"sample_size {sample_size}, n_batches {n_batches}, device {device}")

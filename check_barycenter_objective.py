@@ -3,16 +3,16 @@ Experiment: find maximizer of a concave quadratic function.
 """
 import torch
 import math
-from utils import safe_log
+from utils import get_cost_mat, safe_log
 
 
-from experiment_barycenter import get_cost_matrix, marginals_residuals,\
+from experiment_barycenter import marginals_residuals,\
     barycenter_objective, get_data_and_solution, map_to_simplex, get_optimal_plans
 
 
 def print_cost_mat(device):
     for im_sz in [2, 3]:
-        C = get_cost_matrix(im_sz, device)
+        C = get_cost_mat(im_sz, device)
         print(C)
 
 
@@ -40,7 +40,7 @@ def compare_objective(device):
     check_plans(device, Xs_unoptimal)
 
     im_sz = 3
-    cost_mat = get_cost_matrix(im_sz, device)
+    cost_mat = get_cost_mat(im_sz, device)
     kappas = [torch.tensor(1.), torch.tensor(1.)]
     value_optimal = barycenter_objective(r, Xs, cost_mat, kappas, cs)
     value_unoptimal = barycenter_objective(r, Xs_unoptimal, cost_mat, kappas, cs)

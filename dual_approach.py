@@ -7,8 +7,8 @@ import gc
 import numpy as np
 
 from algorithm import algorithm
-from experiment_barycenter import get_cost_matrix, get_data_and_solution
-from utils import plot_trajectory, norm_sq, get_sampler, plot3d, get_empir_cov, scale_cov
+from experiment_barycenter import get_data_and_solution
+from utils import get_cost_mat, plot_trajectory, norm_sq, get_sampler, plot3d, get_empir_cov, scale_cov
 
 
 def run_experiment(img_size, device, prior_var, var_decay, n_steps, sample_size, kappa, gamma,
@@ -16,7 +16,7 @@ def run_experiment(img_size, device, prior_var, var_decay, n_steps, sample_size,
     n = img_size ** 2  # dimensionality of barycenter
     dtype = torch.float32
 
-    cost_mat = get_cost_matrix(img_size, device, dtype=dtype)
+    cost_mat = get_cost_mat(img_size, device, dtype=dtype)
     cs, r_opt = get_data_and_solution(device, size=img_size, column_interval=(1 if img_size == 3 else 2))
     m = cs.shape[0]
     print("m =", m)

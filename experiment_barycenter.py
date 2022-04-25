@@ -9,26 +9,7 @@ import time
 import gc
 
 from algorithm import algorithm
-from utils import safe_log, plot_trajectory, norm_sq, replace_zeros, get_sampler
-
-
-def get_cost_matrix(im_sz, device, dtype=torch.float32):
-    """
-    Compute ground cost matrix for images.
-
-    :param im_sz: positive int equal to width = height of an image
-    :param device: 'cpu' or 'cuda'
-    :return: (im_sz^2, im_sz^2) tensor
-    """
-    C = torch.zeros(im_sz**2, im_sz**2, device=device, dtype=dtype)
-    for i in range(im_sz):
-        for j in range(im_sz):
-            I = im_sz*i + j
-            for k in range(im_sz):
-                for l in range(im_sz):
-                    J = im_sz*k + l
-                    C[I, J] = (i - k)**2 + (j - l)**2
-    return C / (im_sz - 1)**2
+from utils import safe_log, plot_trajectory, norm_sq, replace_zeros, get_sampler, get_cost_mat
 
 
 def get_data_and_solution(device, dtype=torch.float32, size=3, column_interval=1):
@@ -76,7 +57,7 @@ def get_optimal_value(device, cost_mat, cs, r_opt):
 def experiment_pot(img_size, column_interval, n_steps, device, sample_size, prior_var, var_decay, noise_level=None, add_entropy=False,
                    start_coef=20., decrease=0.25, decay='exp', empir_cov=False, temperature=None, plot=False, track_time=False):
     dtype = torch.float64 if device == 'cpu' else torch.float32  # avoid errors when converting from torch to numpy
-    cost_mat = get_cost_matrix(img_size, device, dtype=dtype)
+    cost_mat = get_cost_mat(img_size, device, dtype=dtype)
     cs, r_opt = get_data_and_solution(device, dtype=dtype, size=img_size, column_interval=column_interval)
 
     if device == 'cpu':

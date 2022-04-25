@@ -7,8 +7,8 @@ from torch.distributions.multivariate_normal import MultivariateNormal
 import scipy.stats
 
 from algorithm import algorithm
-from utils import safe_log, plot_trajectory, norm_sq
-from experiment_barycenter import get_cost_matrix, get_data_and_solution, get_init_barycenter
+from utils import get_cost_mat, safe_log, plot_trajectory, norm_sq
+from experiment_barycenter import get_data_and_solution, get_init_barycenter
 
 
 def marginals_residuals(r, Xs, cs):
@@ -92,7 +92,7 @@ def get_init_plans(r_prior, cs):
 
 def alg_full_sampling(img_size, kappa, var_decay, sample_size, n_steps, prior_std, device, noise_level=None):
     n = img_size ** 2  # barycenter dimensionality
-    cost_mat = get_cost_matrix(img_size, device)
+    cost_mat = get_cost_mat(img_size, device)
     cs, r_opt = get_data_and_solution(device)
     Xs_opt = get_optimal_plans(device)
     # kappas = [kappa, kappa]  # equal coefficients for penalizing both marginals

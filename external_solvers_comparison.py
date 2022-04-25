@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import torch
 from torch.distributions.dirichlet import Dirichlet
 import ot
-from experiment_barycenter import get_cost_matrix
+from utils import get_cost_mat
 
 import time
 import csv
@@ -31,7 +31,7 @@ def sinkhorn_comparison():
 
     im_sz = 5
     n_samples = 10
-    cost_mat = get_cost_matrix(im_sz, device='cuda', dtype=torch.float32)
+    cost_mat = get_cost_mat(im_sz, device='cuda', dtype=torch.float32)
 
     methods = ['sinkhorn', 'sinkhorn_stabilized', 'sinkhorn_log']
     reg_coeffs = [1e-1, 1e-2, 1e-3]  #
@@ -114,7 +114,7 @@ def sinkhorn_scaling():
     for j, im_sz in enumerate(im_szs):
         print(f'IMAGE SIZE {im_sz}')
         n_samples = im_sz ** 2
-        cost_mat = get_cost_matrix(im_sz, device='cuda', dtype=torch.float32)
+        cost_mat = get_cost_mat(im_sz, device='cuda', dtype=torch.float32)
         exact_emds = []
 
         alpha = torch.ones(im_sz**2, device='cuda', dtype=torch.float32)
