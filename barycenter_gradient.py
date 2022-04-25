@@ -1,27 +1,25 @@
 import torch
-import ot
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from typing import Union
+import time
 
-from utils import load_data, show_barycenters, replace_zeros, get_digits_and_bary, plot_convergence
-from experiment_barycenter import get_cost_matrix
+from utils import show_barycenters, get_digits_and_bary, plot_convergence, get_cost_mat, plot_trajectory
 from kantorovich_dual import objective_function
 
 
-def run_sgd(n_steps, cost_mat, cs, dtype, step=0.5, device='cpu', return_what=None, kappa2=None):
+def run_grad_descent(n_steps, cost_mat, cs, z_prior, step=0.5, return_what=None, kappa2=None, momentum=0,
+                     verbose=False, weight_decay=0):
     if return_what is None:
         return_what = ['val']
     kappa = 1. / 30
-    temp = 30.
 
     m = cs.shape[0]
-    n = cost_mat.shape[0]
     objective_output = ['objective'] + (['barycenter'] if 'barycenter' in return_what else [])
-    objective = lambda sample: objective_function(sample, cost_mat, cs, kappa, kappa2=kappa2,
+    objective = lambda sample: objective_function(sample, cost_mat, cs, kappa, kappa2=kappa2, inverse_order=True,
                                                   return_what=objective_output, double_conjugate=False)
     L = m / kappa
-
-    torch.manual_seed(0)
-    z_prior = torch.randn((1, m * n), device=device, dtype=dtype, requires_grad=True)
-    opt = torch.optim.SGD([z_prior], lr=step/L)
+    opt = torch.optim.SGD([z_prior], lr=step/L, momentum=momentum, weight_decay=weight_decay)
+    scheduler = ReduceLROnPlateau(opt, patience=2, threshold=1e-3, verbose=verbose)
 
     losses = []
     best_loss = 1e6
@@ -37,15 +35,18 @@ def run_sgd(n_steps, cost_mat, cs, dtype, step=0.5, device='cpu', return_what=No
             best_potential = z_prior.clone().detach()
         if 'barycenter' in return_what:
             barys.append(obj_out[1].detach())
-        # if i % 100 == 0:
-        #     print(f"Loss: {loss.item():.2f}")
+            # barys.append(z_prior.clone().detach())
+        if verbose and (i % 100 == 0):
+            print(f"    GD step {i}/{n_steps}")
         opt.zero_grad()
         loss.backward()
         opt.step()
+        if i % 200 == 0:
+            scheduler.step(loss)
 
     if len(return_what) == 1 and 'val' in return_what:
-        ten_persent = n_steps//10
-        return sum(losses[-ten_persent:]) / ten_persent
+        last_vals = n_steps//50
+        return sum(losses[-last_vals:]) / last_vals
 
     res = [best_potential] if 'poten' in return_what else []
     res += [losses] if 'losses' in return_what else []
@@ -54,13 +55,17 @@ def run_sgd(n_steps, cost_mat, cs, dtype, step=0.5, device='cpu', return_what=No
 
 
 def get_mid(a, b, func):
+    start = time.time()
     mid = 0.5 * (a + b)
-    return mid, func(mid)
+    f_mid = func(mid)
+    print(f"    Parameter: {mid}, objective: {f_mid:.3f} | {time.time() - start:.2f}s")
+    return mid, f_mid
 
 
 def bisection(a, b, n_bisections, func):
     mid, f_mid = get_mid(a, b, func)
     for i in range(n_bisections):
+        print(f"Bisection {i}/{n_bisections}")
         left, f_left = get_mid(a, mid, func)
         right, f_right = get_mid(mid, b, func)
         if f_left < min(f_mid, f_right):
@@ -76,49 +81,76 @@ def bisection(a, b, n_bisections, func):
     return min([(f_left, right), (f_mid, mid), (f_right, right)])
 
 
-def main(device='cpu', search_stepsize=False, plot_traj=True):
-    dtype = torch.float64
-    img_size = 8
-    cost_mat = get_cost_matrix(img_size, device, dtype=dtype)
+def main(device='cpu', n_steps=1000, init_poten=None, search_stepsize=False, stepsize_bounds=(10, 50), n_bisec=10, stepsize=None,
+         momentum: Union[int, float] = 0, mnist=False, weight_decay: Union[int, float] = 0, verbose=True):
     folder = 'digit_experiment/'
+    data_fname = '35_images_of_5.pt'
+    bary_fname = 'bary_35_im_of_5.pt'
 
-    data_path = folder + '20_images_of_3.pt'
-    bary_path = folder + 'bary_20_im_of_3.pt'
+    if mnist:
+        img_size = 28
+        data_fname = 'mnist_' + data_fname
+        bary_fname = 'mnist_' + bary_fname
+    else:
+        img_size = 8
 
-    cs, r = get_digits_and_bary(data_path, bary_path, target_digit=5, n_data_points=20,
-                                dtype=torch.float32, device=device, cost_mat=cost_mat)
+    dtype = torch.float64
+    cost_mat = get_cost_mat(img_size, device, dtype=dtype)
 
-    n_steps = 1000
+    cs, r = get_digits_and_bary(folder + data_fname, folder + bary_fname, target_digit=5, n_data_points=35,
+                                dtype=dtype, device=device, cost_mat=cost_mat, mnist=mnist, verbose=verbose)
+
+    if init_poten:
+        z_prior = torch.load(init_poten, map_location=device).requires_grad_()
+        if verbose:
+            print(f"Loaded starting point from {init_poten}")
+    else:
+        torch.manual_seed(0)
+        z_prior = torch.randn((1, cs.numel()), device=device, dtype=dtype, requires_grad=True)
+        if verbose:
+            print("Initialized a random starting point")
 
     if search_stepsize:
-        func = lambda step: run_sgd(n_steps, cost_mat, cs, dtype, step=step, device=device)
-        best_val, best_step = bisection(30, 200, 10, func)
+        func = lambda step: run_grad_descent(n_steps, cost_mat, cs, z_prior, step=step, momentum=momentum,
+                                             weight_decay=weight_decay)
+        best_val, best_step = bisection(*stepsize_bounds, n_bisec, func)
         print(f"Best step: {best_step}, best val: {best_val:.2f}")
     else:
-        best_step = 77.8125
+        best_step = stepsize
 
-    if plot_traj:
-        losses, barycenters = run_sgd(n_steps, cost_mat, cs, dtype, step=best_step,
-                                      device=device, return_what=['losses', 'barycenter'])
-        barys_errors = [torch.norm(bar - r) for bar in barycenters]
+    return_what = ['losses', 'barycenter']
+    res = run_grad_descent(n_steps, cost_mat, cs, z_prior, step=best_step, momentum=momentum,
+                                           return_what=return_what, kappa2=.1, verbose=verbose,
+                                           weight_decay=weight_decay)
 
-        info_names = [{'loss': 0}, {'Accuracy of r': 1}]
-        plot_convergence(list(zip(losses, barys_errors)), 'losses_barys_errors',
-                         info_names, log_scale=True, opt_val=None)
+    losses, barycenters = res[-2], res[-1]
+    barys_errors = [torch.norm(bar - r) for bar in barycenters]
 
-    else:
-        best_potential = run_sgd(n_steps, cost_mat, cs, dtype, step=best_step, device=device,
-                                 return_what=['poten'], kappa2=.1)[0]
-
-        barys, titles = [r], ['True bary']
-        kaps = [.1, .12, .14, .16]
-        for kap in kaps:
-            barys.append(
-                objective_function(best_potential.reshape(1, -1), cost_mat, cs, kap, return_what=['barycenter'])[0]
-            )
-            titles.append(f'Bary from poten, k={kap}')
-        show_barycenters(barys, img_size, 'bary_poten_sgd', use_softmax=False, iterations=titles)
+    info_names = [{'loss': 1}, {'Accuracy of r': 2}]
+    trajectory = list(zip(barycenters, losses, barys_errors))
+    plot_trajectory(trajectory, 10, img_size, f'minus_sgd_step_{best_step}', info_names, log_scale=(False, True),
+                    use_softmax=False)
 
 
 if __name__ == '__main__':
-    main('cpu')
+    # main('cuda', stepsize=13.9453125, momentum=0.9, plot_traj=False)
+    # for stepsize in [10.**i for i in range(1, 3)]:
+    #     main('cuda',
+    #          n_steps=2500,
+    #          stepsize=stepsize,
+    #          momentum=0.9,
+    #          mnist=True)
+    main('cuda',
+         n_steps=5000,
+         stepsize=10.,
+         momentum=0.9,
+         mnist=True)
+    # main('cuda',
+    #      n_steps=2500,
+    #      init_poten='digit_experiment/starting_point.pt',
+    #      search_stepsize=True,
+    #      stepsize_bounds=(1, 1000),
+    #      n_bisec=4,
+    #      momentum=0.9,
+    #      weight_decay=1e-4,
+    #      mnist=True)
