@@ -1,6 +1,7 @@
 import time
 from os import environ
 from math import ceil
+import sys
 
 import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
@@ -168,7 +169,7 @@ def mnist_experiment(sample_size, n_batches, prior_var=1e-5, device='cuda', temp
             yield torch.normal(prior_mean, prior_std)
 
     result_mean, result_cov = get_posterior_mean_cov(sample_generator, objective, temperature,
-                                                     save_covs=True, save_dir=folder)
+                                                     save_covs=True, save_dir=folder, total=n_batches)
     info = f'_k{kappa}_t{temperature}_var{prior_var}_N{sample_size}.pt'
     torch.save(result_mean, folder + 'mean' + info)
     torch.save(result_cov, folder + 'cov' + info)
@@ -349,6 +350,8 @@ if __name__ == "__main__":
     # do_sampling = True  # don't draw a large number of samples, just load empirical mean and cov from memory
     # baseline(None, kappa, device='cpu', calc_poten_method=calc_poten_method, calc_poten=calc_poten, reverse_order=False,
     #          do_sampling=do_sampling, sample_size=1000000, n_batches=200, prior_var=5e-5, temperature=30.)
-    sample_size = 2
-    n_batches = 2
-    mnist_experiment(sample_size, n_batches, device='cuda')
+
+    # sample_size = 2
+    # n_batches = 2
+    sample_size, n_batches = [int(sys.argv[1]), int(sys.argv[2])] if len(sys.argv) == 3 else [2, 2]
+    mnist_experiment(sample_size, n_batches, device='cpu')

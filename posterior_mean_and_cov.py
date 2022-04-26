@@ -1,5 +1,6 @@
 import torch
 from math import ceil
+from tqdm import tqdm
 
 from kantorovich_dual import objective_function
 from experiment_barycenter import get_data_and_solution
@@ -31,11 +32,11 @@ def get_posterior_mean(sample_generator, objective, temperature):
     return result
 
 
-def get_posterior_mean_cov(sample_generator, objective, temperature, save_covs=False, save_dir=''):
+def get_posterior_mean_cov(sample_generator, objective, temperature, save_covs=False, save_dir='', total=1000):
     batch_means = []
     batch_covs = []
     objective_values = []
-    for i, batch in enumerate(sample_generator()):  # batch shape: (batch_size, n)
+    for i, batch in enumerate(tqdm(sample_generator(), total=total)):  # batch shape: (batch_size, n)
         batch_values = objective(batch)  # (batch_size,)
         objective_values.append(batch_values)
         batch_weights = torch.softmax(temperature * batch_values, dim=-1)  # (batch_size,)
@@ -59,7 +60,7 @@ def get_posterior_mean_cov(sample_generator, objective, temperature, save_covs=F
     # result_cov = torch.zeros(n, n, dtype=batch_means[0].dtype, device=batch_means[0].device)
 
     start_idx = 0
-    for i, batch_size in enumerate(batch_sizes):
+    for i, batch_size in enumerate(tqdm(batch_sizes)):
         factor = weights[start_idx:start_idx+batch_size].sum()
         if i == 0:
             result_mean *= factor
