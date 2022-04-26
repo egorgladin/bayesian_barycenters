@@ -31,32 +31,42 @@ def get_posterior_mean(sample_generator, objective, temperature):
     return result
 
 
-def get_posterior_mean_cov(sample_generator, objective, temperature):
+def get_posterior_mean_cov(sample_generator, objective, temperature, save_covs=False, save_dir=''):
     batch_means = []
     batch_covs = []
     objective_values = []
-    for batch in sample_generator():  # batch shape: (batch_size, n)
+    for i, batch in enumerate(sample_generator()):  # batch shape: (batch_size, n)
         batch_values = objective(batch)  # (batch_size,)
         objective_values.append(batch_values)
         batch_weights = torch.softmax(temperature * batch_values, dim=-1)  # (batch_size,)
         batch_means.append(batch_weights @ batch)
-        batch_covs.append(
-            ((batch_weights.unsqueeze(1) * batch).unsqueeze(2) @ batch.unsqueeze(1)).sum(dim=0)
-        )
+        batch_cov = ((batch_weights.unsqueeze(1) * batch).unsqueeze(2) @ batch.unsqueeze(1)).sum(dim=0)
+        if save_covs:
+            torch.save(batch_cov, save_dir + f'batch_cov{i}')
+            del batch_cov
+        else:
+            batch_covs.append(batch_cov)
         del batch
 
     batch_sizes = [len(b) for b in objective_values]
     weights = torch.softmax(temperature * torch.cat(objective_values), dim=-1)  # (sample_size,)
     del objective_values
 
-    result_mean = torch.zeros_like(batch_means[0])
-    result_cov = torch.zeros_like(batch_covs[0])
+    result_mean = batch_means[0]
+    result_cov = torch.load(save_dir + 'batch_cov0') if save_covs else batch_covs[0]
+    # result_cov = torch.zeros_like(batch_covs[0])
+    # n = batch_means[0].numel()
+    # result_cov = torch.zeros(n, n, dtype=batch_means[0].dtype, device=batch_means[0].device)
 
     start_idx = 0
     for i, batch_size in enumerate(batch_sizes):
         factor = weights[start_idx:start_idx+batch_size].sum()
-        result_mean += factor * batch_means[i]
-        result_cov += factor * batch_covs[i]
+        if i == 0:
+            result_mean *= factor
+            result_cov *= factor
+        else:
+            result_mean += factor * batch_means[i]
+            result_cov += factor * (torch.load(save_dir + f'batch_cov{i}') if save_covs else batch_covs[i])
         start_idx += batch_size
 
     result_cov -= torch.outer(result_mean, result_mean)

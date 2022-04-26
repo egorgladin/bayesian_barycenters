@@ -1,5 +1,6 @@
 import time
 from os import environ
+from math import ceil
 
 import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
@@ -11,6 +12,7 @@ from operator import itemgetter
 from algorithm import algorithm
 from utils import get_cost_mat, load_data, safe_log, plot_trajectory, replace_zeros, get_sampler, show_barycenter, \
     show_barycenters, get_sampler, norm_sq, get_digits_and_bary
+from posterior_mean_and_cov import get_posterior_mean_cov
 
 from Wass import algorithm as vaios_alg
 from Wass import Objective
@@ -135,9 +137,47 @@ def get_poten_from_alg(cs, cost_mat, device):
     return potentials
 
 
+def mnist_experiment(sample_size, n_batches, prior_var=1e-5, device='cuda', temperature=30., kappa=1./30):
+    folder = 'digit_experiment/'
+    img_sz = 28
+
+    cs = torch.load(folder + 'Archetypes.pt', map_location=device)
+    if cs.requires_grad:
+        cs = cs.detach()
+    dtype = cs.dtype
+    print(f"dtype: {dtype}, cs shape: {cs.shape}")
+    cost_mat = get_cost_mat(img_sz, device, dtype=dtype)
+    potentials = torch.load(folder + 'Mean.pt', map_location=device)
+    if potentials.requires_grad:
+        potentials = potentials.detach()
+
+    objective = lambda sample: objective_function(sample, cost_mat, cs, kappa,
+                                                  inverse_order=True, double_conjugate=False)[0]
+
+    increment = ceil(sample_size / n_batches)
+    # get_sample = get_sampler(increment)
+    # cov = prior_var * torch.eye(potentials.numel(), dtype=dtype, device=device)
+    print('Sampling with variance', prior_var)
+    prior_std = torch.sqrt(torch.tensor(prior_var, device=device, dtype=dtype))
+
+    def sample_generator():
+        prior_mean = potentials.reshape(1, -1).expand(increment, -1)
+        for i in range(n_batches):
+            print(f"sampling batch {i}")
+            torch.manual_seed(i)
+            yield torch.normal(prior_mean, prior_std)
+
+    result_mean, result_cov = get_posterior_mean_cov(sample_generator, objective, temperature,
+                                                     save_covs=True, save_dir=folder)
+    info = f'_k{kappa}_t{temperature}_var{prior_var}_N{sample_size}.pt'
+    torch.save(result_mean, folder + 'mean' + info)
+    torch.save(result_cov, folder + 'cov' + info)
+    print("Saved mean and cov")
+
+
 def baseline(wass_params, kappa, device='cuda', calc_poten_method='sinkhorn',
              calc_poten=True, reverse_order=False, do_sampling=False, sample_size=1000000,
-             prior_var=0.001, n_batches=100, calc_weights=True, temperature=10., calc_posterior=True):
+             prior_var=0.001, n_batches=100, calc_weights=True, temperature=10., calc_posterior=True, mnist=False):
     assert calc_poten_method in ['emd', 'vaios', 'alg', 'sinkhorn']
     assert sample_size % n_batches == 0
     dtype = torch.float64
@@ -149,8 +189,13 @@ def baseline(wass_params, kappa, device='cuda', calc_poten_method='sinkhorn',
     cost_mat = get_cost_mat(img_sz, device, dtype=dtype)
 
     # 1. Get a few images of the same digit and their barycenter
-    cs, r = get_digits_and_bary(folder + 'digits.pt', folder + 'barycenter.pt', target_digit=target_digit,
-                                n_data_points=n_data_points, dtype=dtype, device=device, cost_mat=cost_mat, verbose=True)
+    if mnist:
+        cs = torch.load(folder + 'Archetypes.pt')
+        r = torch.load(folder + 'mnist_bary_35_im_of_5.pt')
+    else:
+        cs, r = get_digits_and_bary(folder + 'digits.pt', folder + 'barycenter.pt', target_digit=target_digit,
+                                    n_data_points=n_data_points, dtype=dtype, device=device, cost_mat=cost_mat,
+                                    verbose=True)
 
     n = len(r)
 
@@ -180,7 +225,7 @@ def baseline(wass_params, kappa, device='cuda', calc_poten_method='sinkhorn',
         torch.save(potentials, folder + 'potentials.pt')
         print("Saved potentials to 'potentials.pt'")
     else:
-        potentials = torch.load(folder + 'potentials.pt', map_location=device)
+        potentials = torch.load(folder + ('MeanNew.pt' if mnist else 'potentials.pt'), map_location=device)
         print("Loaded potentials from 'potentials.pt'")
         if calc_poten_method in ['vaios', 'emd']:
             with open(folder + 'approx_distances.pickle', 'rb') as handle:
@@ -188,7 +233,7 @@ def baseline(wass_params, kappa, device='cuda', calc_poten_method='sinkhorn',
                 print("Loaded distances from 'approx_distances.pickle'")
 
     # 4. Check the quality of potentials by calculating the respective primal variable
-    check_poten = True
+    check_poten = False
     if check_poten:
         titles = ['Barycenter (Sinkhorn)', 'Barycenter from potentials']
 
@@ -225,8 +270,10 @@ def baseline(wass_params, kappa, device='cuda', calc_poten_method='sinkhorn',
     # 5. Sample potentials and calculate empirical mean and covariance
     if do_sampling:
         get_sample = get_sampler(sample_size)
+
         cov = prior_var * torch.eye(n_data_points * n, dtype=dtype, device=device)
         print('Sampling with variance', prior_var)
+
         sample = get_sample(potentials.flatten(), cov, 2)
 
         print('Saving the whole sample')
@@ -296,9 +343,12 @@ def main():
 
 if __name__ == "__main__":
     environ['TCMALLOC_LARGE_ALLOC_REPORT_THRESHOLD'] = '2570000000'
-    kappa = 1. / 30.
-    calc_poten_method = 'alg'  # potentials were calculated using Vaios' algorithm
-    calc_poten = False  # don't calculate potentials again, just load them from memory
-    do_sampling = True  # don't draw a large number of samples, just load empirical mean and cov from memory
-    baseline(None, kappa, device='cpu', calc_poten_method=calc_poten_method, calc_poten=calc_poten, reverse_order=False,
-             do_sampling=do_sampling, sample_size=1000000, n_batches=200, prior_var=5e-5, temperature=30.)
+    # kappa = 1. / 30.
+    # calc_poten_method = 'alg'  # potentials were calculated using Vaios' algorithm
+    # calc_poten = False  # don't calculate potentials again, just load them from memory
+    # do_sampling = True  # don't draw a large number of samples, just load empirical mean and cov from memory
+    # baseline(None, kappa, device='cpu', calc_poten_method=calc_poten_method, calc_poten=calc_poten, reverse_order=False,
+    #          do_sampling=do_sampling, sample_size=1000000, n_batches=200, prior_var=5e-5, temperature=30.)
+    sample_size = 2
+    n_batches = 2
+    mnist_experiment(sample_size, n_batches, device='cuda')
