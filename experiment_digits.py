@@ -354,4 +354,4 @@ if __name__ == "__main__":
     # sample_size = 2
     # n_batches = 2
     sample_size, n_batches = [int(sys.argv[1]), int(sys.argv[2])] if len(sys.argv) == 3 else [2, 2]
-    mnist_experiment(sample_size, n_batches, device='cpu')
+    mnist_experiment(sample_size, n_batches, device='cuda')
