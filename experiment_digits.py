@@ -12,8 +12,8 @@ from operator import itemgetter
 
 from algorithm import algorithm
 from utils import get_cost_mat, load_data, safe_log, plot_trajectory, replace_zeros, get_sampler, show_barycenter, \
-    show_barycenters, get_sampler, norm_sq, get_digits_and_bary
-from posterior_mean_and_cov import get_posterior_mean_cov
+    show_barycenters, get_sampler, norm_sq, get_digits_and_bary, get_sample_generator
+from posterior_mean_and_cov import get_posterior_mean_cov_old
 
 from Wass import algorithm as vaios_alg
 from Wass import Objective
@@ -161,15 +161,11 @@ def mnist_experiment(sample_size, n_batches, prior_var=1e-5, device='cuda', temp
     print('Sampling with variance', prior_var)
     prior_std = torch.sqrt(torch.tensor(prior_var, device=device, dtype=dtype))
 
-    def sample_generator():
-        prior_mean = potentials.reshape(1, -1).expand(increment, -1)
-        for i in range(n_batches):
-            print(f"sampling batch {i}")
-            torch.manual_seed(i)
-            yield torch.normal(prior_mean, prior_std)
+    prior_mean = potentials.reshape(1, -1).expand(increment, -1)
+    sample_generator = get_sample_generator(prior_mean, n_batches, prior_std, verbose=False)
 
-    result_mean, result_cov = get_posterior_mean_cov(sample_generator, objective, temperature,
-                                                     save_covs=True, save_dir=folder, total=n_batches)
+    result_mean, result_cov = get_posterior_mean_cov_old(sample_generator, objective, temperature,
+                                                         save_covs=True, save_dir=folder, total=n_batches)
     info = f'_k{kappa}_t{temperature}_var{prior_var}_N{sample_size}.pt'
     torch.save(result_mean, folder + 'mean' + info)
     torch.save(result_cov, folder + 'cov' + info)

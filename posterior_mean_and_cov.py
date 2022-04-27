@@ -32,7 +32,32 @@ def get_posterior_mean(sample_generator, objective, temperature):
     return result
 
 
-def get_posterior_mean_cov(sample_generator, objective, temperature, save_covs=False, save_dir='', total=1000):
+def get_posterior_mean_cov(sample_generator, objective, temperature, n_batches=None):
+    objective_values = []
+    for i, batch in enumerate(tqdm(sample_generator(), total=n_batches)):
+        objective_values.append(objective(batch))
+
+    batch_sizes = [len(b) for b in objective_values]
+    weights = torch.softmax(temperature * torch.cat(objective_values), dim=-1)
+
+    start_idx = 0
+    for i, batch in enumerate(tqdm(sample_generator(), total=n_batches)):
+        factor = weights[start_idx:start_idx+batch_sizes[i]].sum()
+        batch_weights = torch.softmax(temperature * objective_values[i], dim=-1)
+
+        if i == 0:
+            result_mean = factor * (batch_weights @ batch)
+            result_cov = factor * ((batch_weights.unsqueeze(1) * batch).unsqueeze(2) @ batch.unsqueeze(1)).sum(dim=0)
+        else:
+            result_mean += factor * (batch_weights @ batch)
+            result_cov += factor * ((batch_weights.unsqueeze(1) * batch).unsqueeze(2) @ batch.unsqueeze(1)).sum(dim=0)
+        start_idx += batch_sizes[i]
+
+    result_cov -= torch.outer(result_mean, result_mean)
+    return result_mean, result_cov
+
+
+def get_posterior_mean_cov_old(sample_generator, objective, temperature, save_covs=False, save_dir='', total=1000):
     batch_means = []
     batch_covs = []
     objective_values = []
@@ -134,10 +159,11 @@ def large_sample_test(sample_size, n_batches, cost_mat, cs, dtype, device='cpu',
             yield get_sample(z_prior, prior_cov, i)
 
     if test_cov:
-        _ = get_posterior_mean_cov(sample_generator, objective, temp)
+        _ = get_posterior_mean_cov(sample_generator, objective, temp, n_batches)
+        print("Calculated the cov")
     else:
         _ = get_posterior_mean(sample_generator, objective, temp)
-    print("Calculated the mean")
+        print("Calculated the mean")
 
 
 def test_digits(sample_size, n_batches, device='cpu', large_sample=False, test_cov=False):
@@ -180,25 +206,29 @@ def check_cov(sample_size, n_batches, cost_mat, cs, dtype, device='cpu'):
         for i in range(n_batches):
             yield sample[i*increment:(i+1)*increment]
 
-    batch_mean, batch_cov = get_posterior_mean_cov(sample_generator, objective, temp)
+    # batch_mean, batch_cov = get_posterior_mean_cov_old(sample_generator, objective, temp)
+    batch_mean, batch_cov = get_posterior_mean_cov(sample_generator, objective, temp, n_batches)
     mean_error = torch.norm(true_mean - batch_mean) / torch.norm(true_mean)
     cov_error = torch.norm(true_cov - batch_cov) / torch.norm(true_cov)
     print(f"Relative error: mean {100 * mean_error:.2e}%, cov {100 * cov_error:.2e}%")
 
 
-def mean_cov_testing(test_cov=False):
-    # Check accuracy for moderate sample sizes
-    for sample_size in [1000, 10000]:
-        for n_batches in [10, 100]:
-            for device in ['cpu', 'cuda']:
-                # test_toy_data(sample_size, n_batches, device=device)
-                test_digits(sample_size, n_batches, device=device, test_cov=test_cov)
+def mean_cov_testing(test_cov=False, test_accuracy=True):
+    if test_accuracy:
+        # Check accuracy for moderate sample sizes
+        for sample_size in [1000, 10000]:
+            for n_batches in [10, 100]:
+                for device in ['cpu', 'cuda']:
+                    # test_toy_data(sample_size, n_batches, device=device)
+                    test_digits(sample_size, n_batches, device=device, test_cov=test_cov)
 
-    # Check efficient memory usage for huge sample size
-    sample_size = int(1e6)
-    n_batches = 400
-    test_digits(sample_size, n_batches, device='cuda', large_sample=True, test_cov=test_cov)
+    else:
+        # Check efficient memory usage for huge sample size
+        sample_size = int(1e6)
+        n_batches = 400
+        test_digits(sample_size, n_batches, device='cuda', large_sample=True, test_cov=test_cov)
 
 
 if __name__ == '__main__':
-    mean_cov_testing(test_cov=True)
+    # mean_cov_testing(test_cov=True)
+    mean_cov_testing(test_cov=True, test_accuracy=False)

@@ -333,6 +333,17 @@ def load_mnist(m, target_digit, device, size=(14, 14), dtype=torch.float32, seed
     return (cs / cs.sum(dim=-1, keepdims=True)).to(device)
 
 
+def get_sample_generator(prior_mean, n_batches, prior_std, verbose=False):
+    def sample_generator():
+        for i in range(n_batches):
+            if verbose:
+                print(f"sampling batch {i}")
+            torch.manual_seed(i)
+            yield torch.normal(prior_mean, prior_std)
+
+    return sample_generator
+
+
 def replace_zeros(arr, replace_val=1e-9, sumdim=-1):
     arr[arr == 0] = replace_val
     arr /= arr.sum(dim=sumdim, keepdim=True)
