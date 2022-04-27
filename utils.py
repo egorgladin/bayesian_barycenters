@@ -7,6 +7,7 @@ from math import ceil
 from ot import barycenter as ot_barycenter
 import collections
 import itertools
+import random
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -101,7 +102,7 @@ def get_digits_and_bary(data_path, bary_path, target_digit=None, n_data_points=N
         if not_specified:
             raise ValueError(' and '.join(not_specified) + f"should be specified when file {data_path} doesn't exist")
 
-        _, cs = load_mnist(n_data_points, 5, target_digit, device, size=(28, 28), dtype=dtype)\
+        cs = load_mnist(n_data_points, target_digit, device, size=(28, 28), dtype=dtype)\
             if mnist else load_data(n_data_points, 5, target_digit, device, dtype=dtype)
         torch.save(cs, data_path)
         if verbose:
@@ -317,26 +318,19 @@ def load_data(m, src_digit, target_digit, device, noise=None, dtype=torch.float3
     return r_prior.to(device), torch.stack(cs).to(device)
 
 
-def load_mnist(m, src_digit, target_digit, device, size=(14, 14), dtype=torch.float32):
+def load_mnist(m, target_digit, device, size=(14, 14), dtype=torch.float32, seed=None):
     transform = Compose([
         Resize(size),
         ToTensor()
     ])
     mnist = MNIST('.', train=False, transform=transform, download=True)
-
-    cs = []
-    r_prior = None
-    i = 0
-    while len(cs) < m:
-        img, digit = mnist[i]
-        is_prior = r_prior is None and digit == src_digit
-        if is_prior:
-            r_prior = img.flatten()
-        elif digit == target_digit:
-            cs.append(img)
-        i += 1
+    indexes = (mnist.targets == target_digit).nonzero().flatten().tolist()
+    if seed:
+        torch.random.seed(seed)
+    chosen = random.sample(indexes, m)
+    cs = [mnist[i][0] for i in chosen]
     cs = torch.stack(cs).reshape(m, -1).type(dtype)
-    return r_prior.to(device), (cs / cs.sum()).to(device)
+    return (cs / cs.sum(dim=-1, keepdims=True)).to(device)
 
 
 def replace_zeros(arr, replace_val=1e-9, sumdim=-1):
@@ -346,8 +340,8 @@ def replace_zeros(arr, replace_val=1e-9, sumdim=-1):
 
 
 def test_mnist():
-    r, cs = load_mnist(5, 1, 2, 'cpu', size=(14, 14))
-    images = [c for c in cs] + [r]
+    cs = load_mnist(5, 2, 'cpu', size=(14, 14))
+    images = [c for c in cs]
     img_sz = 14
     image_name = 'mnist_test'
     show_barycenters(images, img_sz, image_name, use_softmax=False, scaling='partial')
