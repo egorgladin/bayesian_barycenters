@@ -47,10 +47,10 @@ def get_posterior_mean_cov(sample_generator, objective, temperature, n_batches=N
 
         if i == 0:
             result_mean = factor * (batch_weights @ batch)
-            result_cov = factor * ((batch_weights.unsqueeze(1) * batch).unsqueeze(2) @ batch.unsqueeze(1)).sum(dim=0)
+            result_cov = factor * ((batch_weights * batch.T) @ batch)
         else:
             result_mean += factor * (batch_weights @ batch)
-            result_cov += factor * ((batch_weights.unsqueeze(1) * batch).unsqueeze(2) @ batch.unsqueeze(1)).sum(dim=0)
+            result_cov += factor * ((batch_weights * batch.T) @ batch)
         start_idx += batch_sizes[i]
 
     result_cov -= torch.outer(result_mean, result_mean)
@@ -230,5 +230,5 @@ def mean_cov_testing(test_cov=False, test_accuracy=True):
 
 
 if __name__ == '__main__':
-    # mean_cov_testing(test_cov=True)
-    mean_cov_testing(test_cov=True, test_accuracy=False)
+    mean_cov_testing(test_cov=True)
+    # mean_cov_testing(test_cov=True, test_accuracy=False)

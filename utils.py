@@ -25,11 +25,10 @@ def get_cost_mat(im_sz, device, dtype=torch.float32):
     partition = torch.linspace(0, 1, im_sz)
     couples = np.array(np.meshgrid(partition, partition)).T.reshape(-1, 2)
     x = np.array(list(itertools.product(couples, repeat=2)))
-    x = torch.tensor(x, dtype=dtype, device=device)  # torch.from_numpy(x).to(device)
+    x = torch.tensor(x, dtype=dtype, device=device)
     a = x[:, 0]
     b = x[:, 1]
     C = torch.linalg.norm(a - b, axis=1) ** 2
-    # C = C.to(device)
     return C.reshape((im_sz**2, -1))
 
 
