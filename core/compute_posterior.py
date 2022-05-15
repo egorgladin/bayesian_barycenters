@@ -1,6 +1,6 @@
 import torch
 from tqdm import tqdm
-from essential_utils import get_c_concave, get_cost_mat, get_sample_generator
+from core.essential_utils import get_c_concave, get_cost_mat, get_sample_generator
 
 
 def objective_function(sample, cost_mat, cs, kappa):

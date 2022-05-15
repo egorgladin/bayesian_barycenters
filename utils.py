@@ -344,7 +344,7 @@ def get_sample_generator(prior_mean, n_batches, prior_std, verbose=False):
 
 
 def replace_zeros(arr, replace_val=1e-9, sumdim=-1):
-    arr[arr == 0] = replace_val
+    arr[arr < replace_val] = replace_val
     arr /= arr.sum(dim=sumdim, keepdim=True)
     return arr
 
