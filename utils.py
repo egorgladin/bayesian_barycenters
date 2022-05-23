@@ -43,10 +43,10 @@ def norm_sq(tensor):
     return torch.square(tensor).sum().item()
 
 
-def show_barycenter(r, fname):
-    img = r.cpu().numpy().reshape(8, -1)
+def show_barycenter(r, fname, im_sz=8, custom_folder=None):
+    img = r.cpu().numpy().reshape(im_sz, -1)
     plt.imshow(img, cmap='binary')
-    plt.savefig(f"plots/{fname}.png", bbox_inches='tight')
+    plt.savefig(f"{custom_folder if custom_folder else 'plots'}/{fname}.png", bbox_inches='tight')
     plt.close()
 
 
@@ -325,7 +325,7 @@ def load_mnist(m, target_digit, device, size=(14, 14), dtype=torch.float32, seed
     mnist = MNIST('.', train=False, transform=transform, download=True)
     indexes = (mnist.targets == target_digit).nonzero().flatten().tolist()
     if seed:
-        torch.random.seed(seed)
+        torch.manual_seed(seed)
     chosen = random.sample(indexes, m)
     cs = [mnist[i][0] for i in chosen]
     cs = torch.stack(cs).reshape(m, -1).type(dtype)
